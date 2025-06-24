@@ -1,0 +1,24 @@
+name = "DynamicMacroeconomics"
+uuid = "426073fa-64f4-4b09-90a5-5be78b0f3547"
+authors = ["Charles Knipp <charles.a.knipp@frb.gov>"]
+version = "0.1.0"
+
+[deps]
+Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
+GeneralisedFilters = "3ef92589-7ab8-43f9-b5b9-a3a0c86ecbb7"
+LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
+MatrixEquations = "99c1a7ee-ab34-5fd5-8076-27c950a045f4"
+Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
+Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
+SSMProblems = "26aad666-b158-4e64-9d35-0e672562fa48"
+TaylorSeries = "6aa5eb33-94cf-58f4-a9d0-e4b2c4fc25ea"
+
+[compat]
+Distributions = "0.25.120"
+GeneralisedFilters = "0.2.1"
+LinearAlgebra = "1.11.0"
+MatrixEquations = "2.5.1"
+Random = "1.11.0"
+Reexport = "1.2.2"
+SSMProblems = "0.5.0"
+TaylorSeries = "0.20.1"
