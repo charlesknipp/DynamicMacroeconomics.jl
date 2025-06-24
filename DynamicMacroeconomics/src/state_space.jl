@@ -1,8 +1,8 @@
 ## LINEAR GAUSSIAN MODEL ###################################################################
 
-struct LinearGaussianControllableDynamics{AT,BT} <: LinearGaussianLatentDynamics
-    A::AT
-    B::BT
+struct LinearGaussianControllableDynamics <: LinearGaussianLatentDynamics
+    A
+    B
 end
 
 function GeneralisedFilters.calc_A(
@@ -30,9 +30,9 @@ function SSMProblems.distribution(
     return StructuralMvNormal(A * state, dyn.B)
 end
 
-struct LinearGaussianControllableObservation{CT,DT} <: LinearGaussianObservationProcess
-    C::CT
-    D::DT
+struct LinearGaussianControllableObservation <: LinearGaussianObservationProcess
+    C
+    D
 end
 
 function GeneralisedFilters.calc_H(
