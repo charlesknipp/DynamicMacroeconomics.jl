@@ -1,7 +1,6 @@
 # DynamicMacroeconomics
 
-A general purpose DSGE interface which presents a lightweight approach to solving macroeconomic models.
-The purpose of creating this module was to rapidly estimate models in liu of (Childers, 2022).
+A general purpose DSGE interface which presents a lightweight approach to solving macroeconomic models. The purpose of creating this module was to rapidly estimate models in liu of (Childers, 2022).
 
 As a departure to `DifferentiableStateSpaceModels.jl`, this module is entirely self contained and builds off of existing tools like `GeneralisedFilters.jl` for marginalized likelihood estimation.
 

@@ -3,57 +3,68 @@ module DynamicMacroeconomics
 using Distributions, Random
 using GeneralisedFilters, SSMProblems
 using MatrixEquations, LinearAlgebra
-using TaylorSeries
+using DifferentiationInterface
 using Reexport
 
 @reexport using SSMProblems, GeneralisedFilters
-@reexport using TaylorSeries: set_variables
 
-export RationalExpectationsModel
+export RationalExpectationsModel, steady_state, optimality_conditions, solve
 
 abstract type RationalExpectationsModel end
 
-"""
-    set_variables(model::RationalExpectationsModel)
+function (model::RationalExpectationsModel)(y::AbstractArray, ε::AbstractArray, t::Int=2)
+    # not too crazy about this, but at least it's hidden from the user
+    return optimality_conditions(model, eachrow(y), eachrow(ε), t)
+end
 
-label the series for which the model function takes in; this is only necessary for using
-TaylorSeries.jl to calculate approximations.
-"""
-function TaylorSeries.set_variables(p::RationalExpectationsModel)
-    throw(MethodError(set_variables, p))
+function (model::RationalExpectationsModel)(y::AbstractArray, ε::AbstractVector, t::Int=2)
+    # noise is almost always a vector, but there may be some special cases with ARMA shocks
+    return optimality_conditions(model, eachrow(y), ε, t)
 end
 
 """
-    model(yp, y, ym, model::RationalExpectationsModel)
+    optimality_conditions(model::RationalExpectationsModel, y, ε, t)
 
-Define the optimality conditions of the model; where yp is forward looking, y is
-contemporaneous, and ym is lagged.
+The optimality conditions of `model` with states `y` and noise `ε` at time `t`. A required
+component to a model's definition.
 
-This is subject to change when I get around to making a nicer interface.
-"""
-function model(yp, y, ym, p::RationalExpectationsModel)
-    throw(MethodError(model, (yp, y, ym, p)))
+# Example
+
+```julia
+struct Demo <: RationalExpectationsModel end
+
+function optimality_conditions(::Demo, y, ε, t)
+    a, b = y
+    εa, εb = ε
+    return [
+        a[t] - 0.1 * a[t-1] - εa,
+        b[t] ^ 2.0 - b[t-1] - εb
+    ]
 end
+```
 
+See also [`steady_state`](@ref).
+"""
+function optimality_conditions(model::RationalExpectationsModel, y, ε, t)
+    error("model equations not defined for $(typeof(model))")
+end
 
 """
     steady_state(model::RationalExpectationsModel)
 
 Compute the model's steady state, where the return is ordered consistently with `model` and
-`set_variables`.
+`set_variables`. Currently, the user must specify this function, but I plan to solve this
+numerically at some point in the future.
+
+See also [`optimality_conditions`](@ref).
 """
-function steady_state(p::RationalExpectationsModel)
-    throw(MethodError(steady_state, p))
+function steady_state(::M) where {M <: RationalExpectationsModel}
+    error("steady state not defined for type $M")
 end
 
-"""
-    construct_shock(model::RationalExpectationsModel; kwargs...)
-
-Define the shock variances for a given model. As of now, this package only supports linear
-and additive stochastic shocks like how ones defines an SDE in `DifferentialEquations.jl`.
-"""
-function construct_shock(p::RationalExpectationsModel; kwargs...)
-    throw(MethodError(construct_shock, p))
+function Base.size(::M) where {M <: RationalExpectationsModel}
+    # TODO: remove the need for this function...
+    error("the user must define `size` such that it returns a tuple of (ny, nε)")
 end
 
 include("misc.jl")

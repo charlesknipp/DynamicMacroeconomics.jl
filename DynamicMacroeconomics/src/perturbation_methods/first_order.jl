@@ -1,32 +1,61 @@
-function linearize(p::RationalExpectationsModel)
-    set_variables(p)
-    ss = steady_state(p)
-    return FirstOrderPerturbation((
-        TaylorSeries.jacobian(taylor_expand(y -> model(y, ss, ss, p), ss, order=1), ss),
-        TaylorSeries.jacobian(taylor_expand(y -> model(ss, y, ss, p), ss, order=1), ss),
-        TaylorSeries.jacobian(taylor_expand(y -> model(ss, ss, y, p), ss, order=1), ss)
-    ))
-end
+"""
+    FirstOrderPerturbation
 
-struct FirstOrderPerturbation{T<:AbstractArray}
-    jacobians::NTuple{3,T}
-    indicies::NTuple{2,Vector{Int}}
-    function FirstOrderPerturbation(jacobians::NTuple{3,T}) where {T<:AbstractArray}
-        us = findall(x -> any(abs.(x) .> 0), eachcol(jacobians[1]))
-        xs = findall(x -> any(abs.(x) .> 0), eachcol(jacobians[3]))
-        return new{T}(jacobians, (xs, us))
+A first order approximation of a given rational expectations model which stores the state
+jacobians `∂Y` and the shock jacobian `∂E`.
+"""
+struct FirstOrderPerturbation{M<:RationalExpectationsModel}
+    ∂Y::AbstractArray{<:Real,3}
+    ∂E::AbstractArray{<:Real,2}
+    function FirstOrderPerturbation(
+        model::M; backend=AutoForwardDiff()
+    ) where {M<:RationalExpectationsModel}
+        ss, ε = steady_state(model), zeros(Bool, size(model)[2])
+        ∂Y = jacobian_sequence(model, ss, ε; backend)
+        ∂E = DifferentiationInterface.jacobian(x -> model([ss ss ss], x), backend, ε)
+        return new{M}(∂Y, ∂E)
     end
 end
 
-function get_jacobians(model::FirstOrderPerturbation)
-    _, xp, x = getindex.(model.jacobians, Ref(:), Ref(model.indicies[1]))
-    up, u, _ = getindex.(model.jacobians, Ref(:), Ref(model.indicies[2]))
-    return up, u, xp, x
-end
+"""
+    QZ()
 
-# based on the method of (Klein, 1999) for ideas defined in (Blanchard-Kahn, 1980)
-function qz(Γ0, Γ1)
-    F = schur(-Γ0, Γ1)
+The algorithm borrowed from (Klein, 1999) for solving the forward looking expectations form
+and converting the quadratic system into a reduced form linear Gaussian policy function.
+
+Note: this is a non-differentiable algorithm and will cause automatic differentiation to
+fail in the case of HMC, until a custom rule is made.
+
+# Example
+
+Given a rational expectations model `model`, we solve the first order system like so:
+
+```julia
+system = FirstOrderPerturbation(model);
+policy, impact = solve(system, QZ());
+```
+
+See also [`QuadraticIteration`](@ref).
+"""
+struct QZ end
+
+function solve(system::FirstOrderPerturbation, ::QZ)
+    # TODO: remove static variables with a QR decomp of B for their respective col
+    A, B, C = eachslice(system.∂Y, dims=3)
+    idx = findall.(x -> any(abs.(x) .> 0), eachcol.([A, C]))
+
+    mixed_idx  = intersect(idx[1], idx[2])
+    strict_idx = sort.(setdiff.(idx, Ref(mixed_idx)))
+
+    ns = length.(strict_idx)
+    nm = length(mixed_idx)
+    n = sum(ns) + nm
+
+    # arrange as is specified in (Villemot, 2011)
+    Γ0 = [B[:, idx[2]] A[:, strict_idx[1]]; zeros(Bool, nm, n - nm) I(nm)]
+    Γ1 = [-C[:, strict_idx[2]] -B[:, strict_idx[1]]; I(nm) zeros(Bool, nm, n - nm)]
+
+    F = schur(Γ0, Γ1)
     eigenvalues = F.β ./ F.α
 
     stable_flag = abs.(eigenvalues) .< 1
@@ -45,54 +74,50 @@ function qz(Γ0, Γ1)
 
     gx = z21 * inv(z11)
     hx = z11 * (s11 \ t11) * inv(z11)
-    return hx, gx
+
+    ghx = [hx; gx;;] * I(size(system.∂Y, 1))[idx[2], :]
+    return ghx, (A * ghx + B) \ -system.∂E
 end
 
-# calculate the policy function and the shock response for the implied VAR form
-function construct_system(
-    model::FirstOrderPerturbation, shocks::AbstractArray, ::Val{:qz}; kwargs...
-)
-    nvars = sum(length, model.indicies)
-    nx, _ = model.indicies
+"""
+    QuadraticIteration(; tol=1e-12, max_iters=2^10)
 
-    up, u, xp, x = get_jacobians(model)
-    hx, gx = qz([xp up], [x u])
+A brute force algorithm which uses an iterative root finding scheme to converge to a policy
+function. While this approach is much simpler than the QZ decomposition, it is considerably
+slower and less accurate. Despite its flaws, it is fully differentiable via AD, and is the
+correct choice for running HMC estimation.
 
-    ghx = [hx; gx;;] * diagm(ones(Base.promote_eltype(hx, gx), nvars))[nx, :]
-    ghu = [up * gx + xp u] \ shocks
+# Example
 
-    return ghx, ghu
+Given a rational expectations model `model`, we solve the first order system like so:
+
+```julia
+system = FirstOrderPerturbation(model);
+policy, impact = solve(system, QuadraticIteration());
+```
+
+See also [`QZ`](@ref).
+"""
+Base.@kwdef struct QuadraticIteration
+    tol::Real = 1e-12
+    max_iters::Int = 2^10
 end
 
-function quadratic_iteration(A, B, C; tol=1e-16, maxiters=2^10, kwargs...)
-    X, Y = zero(A), zero(C)
-    for _ in 1:maxiters
-        X = -(A*X + B) \ C
-        Y = -(C*Y + B) \ A
-        if maximum(C + B*X + A*X*X) < tol
+function solve(system::FirstOrderPerturbation, algo::QuadraticIteration)
+    A, B, C = eachslice(system.∂Y, dims=3)
+    ghx = zero(A)
+
+    for _ in 1:algo.max_iters
+        ghx = -(A*ghx + B) \ C
+        if maximum(C + B*ghx + A*ghx*ghx) < algo.tol
             break
         end
     end
 
-    # if maximum(abs.(eigvals(Y))) > 1.0
-    #     error("No stable equilibrium")
-    # end
-
-    return X
+    return ghx, (A * ghx + B) \ -system.∂E
 end
 
-# calculate the policy function and the shock response for the implied VAR form
-function construct_system(
-    model::FirstOrderPerturbation, shocks::AbstractArray, ::Val{:iteration}; kwargs...
-)
-    J = model.jacobians
-    A = quadratic_iteration(J...)
-    B = (J[1] * A + J[2]) \ shocks
-    return A, B
-end
-
-function solve(p::RationalExpectationsModel, ::Val{1}; method=:qz, kwargs...)
-    shocks = construct_shock(p; kwargs...)
-    model = linearize(p)
-    return construct_system(model, shocks, Val(method); kwargs...)
+function solve(model::RationalExpectationsModel, ::Val{1}; algo=QZ(), kwargs...)
+    system = FirstOrderPerturbation(model; kwargs...)
+    return solve(system, algo)
 end

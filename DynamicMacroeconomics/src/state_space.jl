@@ -1,4 +1,4 @@
-## LINEAR GAUSSIAN MODEL ###################################################################
+export LinearGaussianControllableDynamics, LinearGaussianControllableObservation
 
 struct LinearGaussianControllableDynamics <: LinearGaussianLatentDynamics
     A
@@ -60,13 +60,13 @@ function SSMProblems.distribution(
     return StructuralMvNormal(H * state, obs.D)
 end
 
-function linear_gaussian_control(A, B, C, D)
-    T = Base.promote_eltype(A, B)
-    # Σ = lyapd(A, B * B' + 1e-12I)
-    Σ = I(size(A, 1))
-    return SSMProblems.StateSpaceModel(
-        GeneralisedFilters.HomogeneousGaussianPrior(zeros(T, size(A, 1)), Σ),
-        LinearGaussianControllableDynamics(A, B),
-        LinearGaussianControllableObservation(C, D),
-    )
-end
+# function linear_gaussian_control(A, B, C, D)
+#     T = Base.promote_eltype(A, B)
+#     # Σ = lyapd(A, B * B' + 1e-12I)
+#     Σ = I(size(A, 1))
+#     return SSMProblems.StateSpaceModel(
+#         GeneralisedFilters.HomogeneousGaussianPrior(zeros(T, size(A, 1)), Σ),
+#         LinearGaussianControllableDynamics(A, B),
+#         LinearGaussianControllableObservation(C, D),
+#     )
+# end
