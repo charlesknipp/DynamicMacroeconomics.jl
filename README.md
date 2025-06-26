@@ -23,31 +23,28 @@ using Random
 We begin by defining an RBC model by it's parameters and keeping track of the model variables (in our case this is a vector of TFP, capital, and consumption)
 
 ```julia
-Base.@kwdef struct RBC <: RationalExpectationsModel
-    β = 0.95
+Base.@kwdef struct Parameters
+    β = (1 / 1.05)
     ν = 0.80
     α = 0.30
     δ = 0.25
     γ = 1.00
+    σ = 1.00
 end
 
-DynamicMacroeconomics.set_variables(::RBC) = set_variables([:z, :k, :c])
+Base.size(::RBC) = (3, 1)
 ```
 
-Where optimality conditions are defined by dispatching to the `model` function
+Where optimality conditions represent the models transition dynamics.
 
 ```julia
-function DynamicMacroeconomics.model(yp, y, ym, p::RBC)
-    (; ν, β, δ) = p
-
-    _,  _,  cp = yp
-    z,  k,  c  = y
-    zm, km, _  = ym
-
+function DynamicMacroeconomics.optimality_conditions(model::RBC, y, ε, t::Int)
+    (; β, ν, α, δ, γ, σ) = model.parameters
+    z, k, c = y
     return [
-        z - ν * zm,
-        k - (exp(zm) * km ^ α - c) - (1 - δ) * km,
-        (c ^ -γ) - (cp ^ -γ) * β * (α * exp(z) * k ^ (α - 1) + (1 - δ))
+        z[t] - ν * z[t-1] - σ * ε[];
+        k[t] - (exp(z[t-1]) * k[t-1] ^ α - c[t]) - (1 - δ) * k[t-1];
+        (c[t] ^ -γ) - (c[t+1] ^ -γ) * β * (α * exp(z[t]) * k[t] ^ (α - 1) + (1 - δ))
     ]
 end
 ```
@@ -55,33 +52,27 @@ end
 As of now, the steady state must be determined by a user defined method.
 
 ```julia
-function DynamicMacroeconomics.steady_state(p::RBC)
-    (; β, α, δ) = p
+function DynamicMacroeconomics.steady_state(model::RBC)
+    (; β, α, δ) = model.parameters
     kss = ((1 / β - 1 + δ) / α) ^ (1 / (α - 1))
     css = kss ^ α - δ * kss
-    return [0, kss, css]
+    return [0; kss; css]
 end
-```
-
-Shocks are assumed to be linear and Gaussian, so we define them as a vector of variances, like so:
-
-```julia
-DynamicMacroeconomics.construct_shock(::RBC; σz²::Real=1, kwargs...) = [σz²; 0; 0;;]
 ```
 
 Now that the model is sufficiently defined, we can obtain the policy function by solving the first order perturbation either by QZ decomposition or quadratic iteration.
 
 ```julia
-θ = RBC()
-A1, B1 = solve(θ, 1; method=:qz)
-A2, B2 = solve(θ, 1; method=:iteration)
+rbc_model = RBC()
+A1, B1 = solve(rbc_model, 1; algo=QZ())
+A2, B2 = solve(rbc_model, 1; algo=QuadraticIteration())
 ```
 
 We encourage the user to experiment with `SSMProblems.jl` to create a potentially nonlinear measurement, but we include a constructor for linear Gaussian state space models. To demonstrate we can create a state space observing consumption with a measurement noise of 1.0 and shock variance of 1.4, and simulate 100 time periods.
 
 ```julia
 rng = MersenneTwister(1234)
-ssm = StateSpaceModel(θ, [3], 1.0; σz²=1.4, method=:qz)
+ssm = StateSpaceModel(model, [3], 1.0; algo=QZ())
 x, y = sample(rng, ssm, 100)
 ```
 
