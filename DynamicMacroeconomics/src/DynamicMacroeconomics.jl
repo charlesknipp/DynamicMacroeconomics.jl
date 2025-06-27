@@ -6,6 +6,8 @@ using MatrixEquations, LinearAlgebra
 using DifferentiationInterface
 using Reexport
 
+import ForwardDiff
+
 @reexport using SSMProblems, GeneralisedFilters
 
 export RationalExpectationsModel, steady_state, optimality_conditions, solve

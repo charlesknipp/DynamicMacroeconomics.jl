@@ -12,5 +12,5 @@ download_ssm_packages()
 
 # also for precompilation in the custom environment
 Pkg.activate(".")
-download_ssm_packages()
 Pkg.develop(path="DynamicMacroeconomics/")
+download_ssm_packages()
