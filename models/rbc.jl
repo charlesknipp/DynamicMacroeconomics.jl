@@ -3,6 +3,10 @@ using Turing, Distributions, Random
 using GeneralisedFilters
 using StatsPlots
 
+# for automatic differentiation
+using DifferentiationInterface
+import ForwardDiff
+
 Base.@kwdef struct Parameters
     β = (1 / 1.05)
     ν = 0.80
@@ -23,11 +27,11 @@ Base.size(::RBC) = (3, 1)
 
 function DynamicMacroeconomics.optimality_conditions(model::RBC, y, ε, t::Int)
     (; β, ν, α, δ, γ, σ) = model.parameters
-    z, k, c = y
+    c, k, z = y
     return [
         z[t] - ν * z[t-1] - σ * ε[];
-        k[t] - (exp(z[t-1]) * k[t-1] ^ α - c[t]) - (1 - δ) * k[t-1];
-        (c[t] ^ -γ) - (c[t+1] ^ -γ) * β * (α * exp(z[t]) * k[t] ^ (α - 1) + (1 - δ))
+        k[t] - (exp(z[t]) * k[t-1]^α - c[t]) - (1 - δ) * k[t-1];
+        (c[t] ^ -γ) - (c[t+1] ^ -γ) * β * (α * exp(z[t+1]) * k[t] ^ (α - 1) + (1 - δ))
     ]
 end
 
@@ -35,7 +39,7 @@ function DynamicMacroeconomics.steady_state(model::RBC)
     (; β, α, δ) = model.parameters
     kss = ((1 / β - 1 + δ) / α) ^ (1 / (α - 1))
     css = kss ^ α - δ * kss
-    return [0; kss; css]
+    return [css; kss; 0]
 end
 
 ## ESTIMATION ##############################################################################
@@ -57,7 +61,7 @@ end
 rng = MersenneTwister(1234);
 θ = RBC();
 
-true_model = solve_model(θ, [3], 1.0);
+true_model = state_space(θ, [1], 1.0);
 x, y = sample(rng, true_model, 100);
 
 @model function rbc_model(data)
@@ -71,7 +75,7 @@ x, y = sample(rng, true_model, 100);
 
     # observe consumption with unit variance and solve with the iterative approach
     model = state_space(
-        RBC(; α, ν, γ, σ), [3], 1.0; algo=QuadraticIteration()
+        RBC(; α, ν, γ, σ), [1], 1.0; algo=QuadraticIteration(), backend=AutoForwardDiff()
     )
 
     # run the Kalman filter
