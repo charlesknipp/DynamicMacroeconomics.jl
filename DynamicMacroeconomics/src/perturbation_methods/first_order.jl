@@ -39,23 +39,31 @@ See also [`QuadraticIteration`](@ref).
 """
 struct QZ end
 
+not_in(x, y::AbstractArray) = isempty(x) ? ones(Bool, length(y)) : @. !in(x, y)
+
 function solve(system::FirstOrderPerturbation, ::QZ)
     # TODO: remove static variables with a QR decomp of B for their respective col
     A, B, C = eachslice(system.∂Y, dims=3)
     idx = findall.(x -> any(abs.(x) .> 0), eachcol.([A, C]))
 
-    mixed_idx  = intersect(idx[1], idx[2])
-    strict_idx = sort.(setdiff.(idx, Ref(mixed_idx)))
+    mixed_idx  = intersect(idx...)
+    mixed_loc  = sort.(indexin.(Ref(mixed_idx), idx))
+    strict_idx = symdiff.(idx, Ref(mixed_idx))
+    not_mixed  = indexin.(strict_idx, idx)
 
-    ns = length.(strict_idx)
-    nm = length(mixed_idx)
-    n = sum(ns) + nm
+    ns, nm = length.(idx), length(mixed_idx)
+    reorder = [strict_idx[2]; idx[1]]
 
-    # arrange as is specified in (Villemot, 2011)
-    Γ0 = [B[:, idx[2]] A[:, strict_idx[1]]; zeros(Bool, nm, n - nm) I(nm)]
-    Γ1 = [-C[:, strict_idx[2]] -B[:, strict_idx[1]]; I(nm) zeros(Bool, nm, n - nm)]
+    # partition the system as in (Villemot, 2011)
+    Γ012, Γ112 = getindex.([A, -B], Ref(:), Ref(idx[1]))
+    Γ011, Γ111 = getindex.([B, -C], Ref(:), Ref(idx[2]))
+    Γ011 = Γ011 * Diagonal(not_in(mixed_idx, idx[2]))
 
-    F = schur(Γ0, Γ1)
+    # pad the remainder to enforce square matrices
+    Γ122, Γ021 = getindex.(I.(ns), mixed_loc, Ref(:))
+    Γ022, Γ121 = zeros.(Ref(Bool), Ref(nm), ns)
+
+    F = schur([Γ011 Γ012; Γ021 Γ022], [Γ111 Γ112; Γ121 Γ122])
     eigenvalues = F.β ./ F.α
 
     stable_flag = abs.(eigenvalues) .< 1
@@ -75,7 +83,9 @@ function solve(system::FirstOrderPerturbation, ::QZ)
     gx = z21 * inv(z11)
     hx = z11 * (s11 \ t11) * inv(z11)
 
-    ghx = [hx; gx;;] * I(size(system.∂Y, 1))[idx[2], :]
+    ghx = [hx[not_mixed[2], :]; gx;;] * I(size(system.∂Y, 1))[idx[2], :]
+    ghx = ghx[reorder, :]
+    
     return ghx, (A * ghx + B) \ -system.∂E
 end
 
