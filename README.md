@@ -43,8 +43,8 @@ function DynamicMacroeconomics.optimality_conditions(model::RBC, y, ε, t::Int)
     z, k, c = y
     return [
         z[t] - ν * z[t-1] - σ * ε[];
-        k[t] - (exp(z[t-1]) * k[t-1] ^ α - c[t]) - (1 - δ) * k[t-1];
-        (c[t] ^ -γ) - (c[t+1] ^ -γ) * β * (α * exp(z[t]) * k[t] ^ (α - 1) + (1 - δ))
+        k[t] - (exp(z[t]) * k[t-1]^α - c[t]) - (1 - δ) * k[t-1];
+        (c[t] ^ -γ) - (c[t+1] ^ -γ) * β * (α * exp(z[t+1]) * k[t] ^ (α - 1) + (1 - δ))
     ]
 end
 ```
