@@ -4,24 +4,203 @@ A general purpose DSGE interface which presents a lightweight approach to solvin
 
 ## Solving the RBC Model
 
-Consider the basic RBC model
+```@example rbc
+using DynamicMacroeconomics
+using DifferentiationInterface
+import ForwardDiff
+```
+
+Consider a perfectly competitive economy where households directly supply their capital reserves $K_{t-1}$ and labor hours $L_{t}$ to firms, who produce goods $Y_{t}$ according to a production plan $f(Z_{t}, K_{t-1}, L_{t})$ with exogenous productivity $Z_{t}$.
+
+This is called the *RBC Model* where $f$ is chosen to reflect perfect competition, and households / firms instantaneously react to changes in prices for capital $r_{t}$ and labor $w_{t}$.
+
+### Firms
+
+Firms pay households $(r_{t}, w_{t})$ for $(K_{t-1}, L_{t})$ to produce $Y_{t}$ and maximize profits:
 
 ```math
 \begin{aligned}
-	c_{t+1}^{\gamma} &= c_{t} ^ {\gamma} \beta \left(\alpha z_{t} k_{t}^{\alpha-1} + (1 - \delta) \right) \\
-	k_{t} &= z_{t-1} k_{t-1}^{\alpha} - c_{t} + (1 - \delta) k_{t-1} \\
-	\log z_{t} &= \nu \log z_{t-1} + \varepsilon
+	\max_{K_{t},L_{t}} \ f(Z_{t}, K_{t-1}, L_{t}) - r_{t} K_{t-1} - w_{t} L_{t} \\
+	\implies r_{t} = \frac{\partial f}{\partial K_{t-1}} \quad w_{t} = \frac{\partial f}{\partial L_{t}}
 \end{aligned}
 ```
 
-## First Order Perturbations
-
-Consider a DSGE model with states $y_{t}$ and shock $\varepsilon_{t}$ defined by the optimality conditions $F(y, \varepsilon)$ and it's steady state $y^{*}$ such that $F(y^{*}, 0) = 0$.
-
-Upon taking derivatives, we can achieve a first order approximation of the following form:
+Consider, for example, a Cobb-Douglas production function $f(Z_{t}, K_{t-1}, L_{t}) = Z_{t} K_{t-1}^{\alpha} L_{t}^{1-\alpha}$ where the capital and labor demand functions are as follows:
 
 ```math
-0 = A E \left[ y_{t+1} \right] + B y_{t} + C y_{t-1} + D \varepsilon_{t}
+r_{t} = \alpha Z_{t} K_{t-1}^{\alpha-1} L_{t}^{1-\alpha} \quad w_{t} = (1-\alpha) Z_{t} K_{t-1}^{\alpha} L_{t}^{-\alpha}
 ```
 
-where A, B, and C are the derivatives with respect to the forward looking, contemporaneous, and lagged state variables respectively and D is the derivative with respect to the shock $\varepsilon_{t}$
+Note that in a perfectly competitive economy $Y_{t} = r_{t} K_{t-1} + w_{t} L_{t}$ which can be validated by substituting the Cobb-Douglas production into the above expressions.
+
+### Households
+
+Households spend last periods earnings $r_{t} K_{t-1} + w_{t} L_{t}$ to either save $I_{t}$ or consume $C_{t}$ in order to maximize their expected lifetime utility:
+
+```math
+\begin{aligned}
+	\max_{C_{t}, I_{t}, L_{t}, K_{t}} \sum \beta^{t} u(C_{t}, L_{t}) \quad \text{s.t.} \quad & r_{t} K_{t-1} + w_{t} L_{t} = I_{t} + C_{t} \\
+	& K_{t} = I_{t} + (1 - \delta) K_{t-1}
+\end{aligned}
+```
+which can be combined to a single *Walrasian* constraint
+```math
+\max \sum \beta^{t} u(C_{t}, L_{t}) \quad \text{s.t.} \quad K_{t} = w_{t} L_{t} + (r_{t}+1-\delta) K_{t-1} - C_{t}
+```
+
+Solving this problem yields the following dynamics
+```math
+\begin{align}
+	\partial u / \partial C_{t+1} &= \partial u / \partial C_{t} \ \beta \left(r_{t} + 1 - \delta \right) \\
+	-\partial u / \partial L_{t} &= \partial u / \partial C_{t} \ w_{t}
+\end{align}
+```
+which represent the labor and capital supply functions.
+
+**Note:** utility functions are more abstract than production plans since they reflect a preference order on $(C_{t}, L_{t})$, where $u$ is isotone in $C_{t}$ and antitone in $L_{t}$ see [here](https://en.wikipedia.org/wiki/Ordinal_utility) for more details.
+
+Here, I use an isoelastic utility function
+```math
+u(C_{t}, L_{t}) = \frac{C_{t}^{1 - \gamma}}{1 - \gamma} - \frac{L_{t}^{1 + \nu}}{1 + \nu}
+```
+which has additively separable preferences (important for later).
+
+### Optimality Conditions
+
+To summarize, the model exhibits the following dynamics according to both households and firms:
+
+```math
+\begin{aligned}
+	\partial u / \partial C_{t+1} &= \partial u / \partial C_{t} \ \beta \left(r_{t} + 1 - \delta \right) \\
+	-\partial u / \partial L_{t} &= \partial u / \partial C_{t} \ w_{t} \\
+	K_{t} &= (w_{t} L_{t} + r_{t} K_{t-1} - C_{t}) + (1 - \delta) K_{t-1} \\
+	r_{t} &= \partial f / \partial K_{t-1} \\
+	w_{t} &= \partial f / \partial L_{t}
+\end{aligned}
+```
+
+There are a few simplifying assumptions we can make to more briefly describe the transition dynamics for both households and firms.
+
+- Let $L_{t} = 1$ which implies that households are salaried (recall $L_{t}$ is hours worked)
+- Firms are perfectly competitive, therefore $Y_{t} = r_{t} K_{t-1} + w_{t} L_{t} \implies Y_{t} = C_{t} + I_{t}$
+
+With these simplifications, we can reduce the model to the following dynamics:
+```math
+\begin{aligned}
+	\partial u / \partial C_{t+1} &= \partial u / \partial C_{t} \ \beta \ \left(\partial f / \partial K_{t-1} + 1 - \delta \right) \\
+	K_{t} &= f(Z_{t}, K_{t-1}, 1) - C_{t} + (1 - \delta) K_{t-1} \\
+\end{aligned}
+```
+which substitutes rental rate $r_{t}$ using capital demand and removes the constants associated with households choosing $L_{t}$ since (1) $u$ is motononic, (2) preferences are additively separable, and (3) optimal choice is purely ordinal.
+
+#### A Note on Simplicity
+
+This write up is intended to explain general equilibrium from having zero exposure to economics. Therefore, I intentionally take a long winded approach to explain the model's context and it's solution.
+
+For example, I could have easily let markets clear $Y_{t} = C_{t} + I_{t}$ be present in the household's constraint, eliminating many of the reductions taken after optimization. But we cannot assume they do without *welfare theorems*, thus I show this fact ex-post.
+
+### Stochastic Shocks
+
+Let's finally address the mostly neglected exogenous component $Z_{t}$, by constructing a mean reverting stochastic process with noise $\varepsilon_{t}$. Moreover, to ensure $Z_{t}$ remains positive, we can operate in the log space:
+```math
+\log Z_{t} = \rho \log Z_{t-1} + \varepsilon_{t}
+```
+with $\varepsilon_{t} \sim N(0, 1)$
+
+### Defining the Model in `DynamicMacroeconomics`
+
+With Cobb-Douglas production and an isoelastic utility, we can define the RBC model in full like so:
+
+```@example rbc
+Base.@kwdef struct Parameters
+    β = (1 / 1.05)
+    ρ = 0.80
+    α = 0.30
+    δ = 0.25
+    γ = 1.00
+    σ = 1.00
+end;
+
+struct RBC <: RationalExpectationsModel
+    parameters::Parameters
+    function RBC(; kwargs...)
+        return new(Parameters(; kwargs...))
+    end
+end;
+
+function DynamicMacroeconomics.optimality_conditions(model::RBC, y, ε, t::Int)
+    (; β, ρ, α, δ, γ, σ) = model.parameters
+    c, k, z = y
+    return [
+        z[t] - ρ * z[t-1] - σ * ε[];
+        k[t] - (exp(z[t]) * k[t-1]^α - c[t]) - (1 - δ) * k[t-1];
+        (c[t] ^ -γ) - (c[t+1] ^ -γ) * β * (α * exp(z[t+1]) * k[t] ^ (α - 1) + (1 - δ))
+    ]
+end;
+```
+
+```@setup rbc
+# hidden because I hate that this is necessary and I want to remove it...
+Base.size(::RBC) = (3, 1);
+```
+
+### Steady States
+
+The first step to solving the model is obtaining the solution to the steady state, which represents an intertemporal fixed point.
+
+Essentially, you take the optimality conditions $F(Z_{t},K_{t},C_{t})$ and let $X^{*} = X_{t} = X_{t+1}$ be the steady state value for $X = \{ Z, K, C \}$.
+
+**Note:** for numerical computation, this can be done with some simple root finding algorithms in most settings; but for speed, I calculate this by hand which is reflected in the following code.
+
+```@example rbc
+function DynamicMacroeconomics.steady_state(model::RBC)
+    (; β, α, δ) = model.parameters
+    kss = ((1 / β - 1 + δ) / α) ^ (1 / (α - 1))
+    css = kss ^ α - δ * kss
+    return [css; kss; 0]
+end;
+```
+
+With the steady state calculation defined, we have enough to materialize the RBC model.
+
+```@example rbc
+rbc_model = RBC()
+```
+
+### Obtaining the State Space
+
+Using the optimality conditions to directly define dynamics is a slippery slope. On one hand, you can work with a continuous time version to directly define a PDE for this model. 
+
+However, the model is only *saddle-path stable* which implies a slight deviation from steady state will ensure a solution converges to either boundary without a backwards pass. To see this, we can look at the implied phase diagram:
+
+[insert phase diagram]
+
+This behavior is a direct property of the Pontryagin Maximum Principle, in which deviation from steady state violates the *transversality condition*. In macroeconomics this set of properties ensures solutions are interior, which is referred to as satisfying the *Inada conditions*.
+
+To ensure that (1) solutions are stable and (2) states are purely backwards looking, we often use a k-th order approximation around the steady state to ensure proper transition dynamics.
+
+### Approximation
+
+First let the lowercase denote the deviation from the steady state value and define the state vector $x_{t} = [z_{t}, k_{t}, c_{t}]$
+
+Assume a first order perturbation for simplicity sake (this generalizes to a higher order)
+```math
+0 = A x_{t+1} + B x_{t} + C x_{t-1} + D \varepsilon_{t}
+```
+where $A, B$ and $C$ are Jacobians with respect to the state variables, and $D$ is the Jacobian with respect to the shock $\varepsilon$.
+
+**Goal:** We want to solve for $P,Q$ such that $x_{t} = P x_{t-1} + Q \varepsilon_{t}$
+
+Rational expectations imply $E\left[\varepsilon_{t} \right] = 0$ therefore $x_{t+1} = P x_{t}$, which we can substitute to solve for the following:
+
+```math
+0 = A P P + BP + C \quad \text{and} \quad 0 = (AP + B) Q + D
+```
+
+This yields matrices $P$ and $Q$ which defines the state transition for a first order system.
+
+Using `DynamicMacroeconomics`, we can obtain these matrices and construct a `SSMProblems` compatible state space (as a vector autoregression) like so:
+```@example rbc
+P, Q = solve(rbc_model, 1; algo=QuadraticIteration(), backend=AutoForwardDiff())
+VAR  = LinearGaussianControllableDynamics(P, Q)
+```
