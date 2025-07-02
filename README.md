@@ -20,59 +20,46 @@ using GeneralisedFilters
 using Random
 ```
 
-We begin by defining an RBC model by it's parameters and keeping track of the model variables (in our case this is a vector of TFP, capital, and consumption)
+We begin by defining the model equations, where each of the function arguments are state variables (including shocks).
 
 ```julia
-Base.@kwdef struct Parameters
-    β = (1 / 1.05)
-    ν = 0.80
-    α = 0.30
-    δ = 0.25
-    γ = 1.00
-    σ = 1.00
+@block function productivity(z, ε)
+    z[t] = ρ * z[t-1] + σ * ε[t]
 end
 
-Base.size(::RBC) = (3, 1)
-```
+@block function euler(c, k, z)
+    (c[t] ^ -γ) = (c[t+1] ^ -γ) * β * (α * exp(z[t+1]) * k[t] ^ (α - 1) + (1 - δ))
+end
 
-Where optimality conditions represent the models transition dynamics.
-
-```julia
-function DynamicMacroeconomics.optimality_conditions(model::RBC, y, ε, t::Int)
-    (; β, ν, α, δ, γ, σ) = model.parameters
-    z, k, c = y
-    return [
-        z[t] - ν * z[t-1] - σ * ε[];
-        k[t] - (exp(z[t]) * k[t-1]^α - c[t]) - (1 - δ) * k[t-1];
-        (c[t] ^ -γ) - (c[t+1] ^ -γ) * β * (α * exp(z[t+1]) * k[t] ^ (α - 1) + (1 - δ))
-    ]
+@block function budget(c, k, z)
+    k[t] = (exp(z[t]) * k[t-1]^α - c[t]) + (1 - δ) * k[t-1]
 end
 ```
 
 As of now, the steady state must be determined by a user defined method.
 
 ```julia
-function DynamicMacroeconomics.steady_state(model::RBC)
-    (; β, α, δ) = model.parameters
+function steady_state(θ)
+    (; β, α, δ) = θ
     kss = ((1 / β - 1 + δ) / α) ^ (1 / (α - 1))
     css = kss ^ α - δ * kss
-    return [0; kss; css]
+    return (c=css, k=kss, z=0)
 end
 ```
 
-Now that the model is sufficiently defined, we can obtain the policy function by solving the first order perturbation either by QZ decomposition or quadratic iteration.
+Now that the model is sufficiently defined, we can obtain the policy function by solving the first order perturbation either by QZ decomposition (work in progress) or quadratic iteration.
 
 ```julia
-rbc_model = RBC()
-A1, B1 = solve(rbc_model, 1; algo=QZ())
+rbc_model = RationalExpectationsModel([productivity, euler, budget], steady_state, [:ε])
+A1, B1 = solve(rbc_model, 1; algo=QZ()) # broken
 A2, B2 = solve(rbc_model, 1; algo=QuadraticIteration())
 ```
 
-We encourage the user to experiment with `SSMProblems.jl` to create a potentially nonlinear measurement, but we include a constructor for linear Gaussian state space models. To demonstrate we can create a state space observing consumption with a measurement noise of 1.0 and shock variance of 1.4, and simulate 100 time periods.
+We encourage the user to experiment with `SSMProblems.jl` to create a potentially nonlinear measurement, but we include a constructor for linear Gaussian state space models. To demonstrate we can create a state space observing consumption with a measurement noise of 1.0, and simulate 100 time periods.
 
 ```julia
 rng = MersenneTwister(1234)
-ssm = StateSpaceModel(model, [3], 1.0; algo=QZ())
+ssm = state_space(rbc_model, θ, [:c], 1; algo=QuadraticIteration())
 x, y = sample(rng, ssm, 100)
 ```
 
@@ -80,6 +67,8 @@ Using `GeneralizedFilters.jl`, we can extract the loglikelihood with the Kalman 
 
 ## FAQ
 
-As of now, models are limited to a (Schmitt-Grohe & Uribe, 2004) paradigm. Essentially where forward looking variables are on different timings than state variables. There are ways around this, but my code isn't robust to deviations thus far.
+- Models only support one lead and one lag as of now.
+- I plan on adding the numerical calculation of steady states, but it is absent for now.
+- QZ does not work for most models, since it was made prior to the macro which records timings.
 
 Just ask me for questions on the implementation, and if you see anything questionable feel free to raise an issue or a PR.

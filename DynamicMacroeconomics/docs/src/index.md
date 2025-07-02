@@ -112,37 +112,21 @@ with $\varepsilon_{t} \sim N(0, 1)$
 With Cobb-Douglas production and an isoelastic utility, we can define the RBC model in full like so:
 
 ```@example rbc
-Base.@kwdef struct Parameters
-    β = (1 / 1.05)
-    ρ = 0.80
-    α = 0.30
-    δ = 0.25
-    γ = 1.00
-    σ = 1.00
+@block function productivity_process(z, ε)
+    z[t] = ρ * z[t-1] + σ * ε[t]
 end;
 
-struct RBC <: RationalExpectationsModel
-    parameters::Parameters
-    function RBC(; kwargs...)
-        return new(Parameters(; kwargs...))
-    end
+@block function euler_equation(c, k, z)
+    (c[t] ^ -γ) = (c[t+1] ^ -γ) * β * (α * exp(z[t+1]) * k[t] ^ (α - 1) + (1 - δ))
 end;
 
-function DynamicMacroeconomics.optimality_conditions(model::RBC, y, ε, t::Int)
-    (; β, ρ, α, δ, γ, σ) = model.parameters
-    c, k, z = y
-    return [
-        z[t] - ρ * z[t-1] - σ * ε[];
-        k[t] - (exp(z[t]) * k[t-1]^α - c[t]) - (1 - δ) * k[t-1];
-        (c[t] ^ -γ) - (c[t+1] ^ -γ) * β * (α * exp(z[t+1]) * k[t] ^ (α - 1) + (1 - δ))
-    ]
+@block function budget_dynamics(c, k, z)
+    k[t] = (exp(z[t]) * k[t-1]^α - c[t]) + (1 - δ) * k[t-1]
 end;
+nothing # hide
 ```
 
-```@setup rbc
-# hidden because I hate that this is necessary and I want to remove it...
-Base.size(::RBC) = (3, 1);
-```
+Everything can also be defined in a single block ala Dynare; but for robust techniques, like sequence Jacobian methods, it could be advantageous to work things out sparsely in blocks.
 
 ### Steady States
 
@@ -153,31 +137,68 @@ Essentially, you take the optimality conditions $F(Z_{t},K_{t},C_{t})$ and let $
 **Note:** for numerical computation, this can be done with some simple root finding algorithms in most settings; but for speed, I calculate this by hand which is reflected in the following code.
 
 ```@example rbc
-function DynamicMacroeconomics.steady_state(model::RBC)
-    (; β, α, δ) = model.parameters
+function analytical_steady_state(θ)
+    (; β, α, δ) = θ
     kss = ((1 / β - 1 + δ) / α) ^ (1 / (α - 1))
     css = kss ^ α - δ * kss
-    return [css; kss; 0]
+    return (c=css, k=kss, z=0)
 end;
+nothing # hide
 ```
 
 With the steady state calculation defined, we have enough to materialize the RBC model.
 
 ```@example rbc
-rbc_model = RBC()
+θ = (
+    β = 1/1.05,
+    α = 0.30,
+    δ = 0.25,
+    γ = 1.00,
+    σ = 1.00,
+    ρ = 0.80
+);
+
+rbc_model = RationalExpectationsModel(
+    [productivity_process, budget_dynamics, euler_equation], analytical_steady_state, [:ε]
+);
+nothing # hide
 ```
 
 ### Obtaining the State Space
 
-Using the optimality conditions to directly define dynamics is a slippery slope. On one hand, you can work with a continuous time version to directly define a PDE for this model. 
+Using the optimality conditions to directly define dynamics is a slippery slope. Ideally, one could just work with the PDE implied from the Hamiltonian.
 
-However, the model is only *saddle-path stable* which implies a slight deviation from steady state will ensure a solution converges to either boundary without a backwards pass. To see this, we can look at the implied phase diagram:
+However, this approach is only *saddle-path stable*. Therefore, slight deviations from steady-state will tend toward the boundaries when moving forward in time. The phase plot below summarizes this behavior for the continuous time version of the RBC model defined above.
 
-[insert phase diagram]
+```@setup rbc
+using CairoMakie
+
+ss = NamedTuple{rbc_model.states}(steady_state(rbc_model, θ))
+
+# continuous time realization of the RBC model with productivity fixed at steady-state
+function rbc_dynamics(θ)
+    (; α, β, γ, δ) = θ
+    ss = NamedTuple{rbc_model.states}(steady_state(rbc_model, θ))
+    ρ = (inv(β) - 1)
+    return (k, c) -> Point(
+        (exp(ss[:z]) * k ^ α - c) - δ * k,
+        (1 / γ) * c * (α * exp(ss[:z]) * k ^ (α - 1) - δ - ρ)
+    )
+end
+
+fig = Figure()
+klim, clim = 2*ss[:k], 2*ss[:c] 
+ax = Axis(fig[1,1], title="RBC phase plot", limits=((0.1, klim), (0.1, clim)))
+hidedecorations!(ax)
+streamplot!(ax, rbc_dynamics(θ), 0.1..klim, 0.1..clim, colorscale=log, arrow_size=10)
+save("rbc-phase-plot.png", fig)
+```
+
+![](rbc-phase-plot.png)
 
 This behavior is a direct property of the Pontryagin Maximum Principle, in which deviation from steady state violates the *transversality condition*. In macroeconomics this set of properties ensures solutions are interior, which is referred to as satisfying the *Inada conditions*.
 
-To ensure that (1) solutions are stable and (2) states are purely backwards looking, we often use a k-th order approximation around the steady state to ensure proper transition dynamics.
+To ensure that (1) solutions are stable and (2) states are purely backwards looking, we often use a k-th order approximation around the steady state to guarantee transition dynamics.
 
 ### Approximation
 
@@ -201,6 +222,6 @@ This yields matrices $P$ and $Q$ which defines the state transition for a first 
 
 Using `DynamicMacroeconomics`, we can obtain these matrices and construct a `SSMProblems` compatible state space (as a vector autoregression) like so:
 ```@example rbc
-P, Q = solve(rbc_model, 1; algo=QuadraticIteration(), backend=AutoForwardDiff())
+P, Q = solve(rbc_model, θ, 1; algo=QuadraticIteration(), backend=AutoForwardDiff())
 VAR  = LinearGaussianControllableDynamics(P, Q)
 ```
