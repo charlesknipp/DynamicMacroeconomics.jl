@@ -4,16 +4,24 @@
 A first order approximation of a given rational expectations model which stores the state
 jacobians `∂Y` and the shock jacobian `∂E`.
 """
-struct FirstOrderPerturbation{M<:RationalExpectationsModel}
+struct FirstOrderPerturbation
     ∂Y::AbstractArray{<:Real,3}
     ∂E::AbstractArray{<:Real,2}
     function FirstOrderPerturbation(
-        model::M; backend=AutoForwardDiff()
-    ) where {M<:RationalExpectationsModel}
-        ss, ε = steady_state(model), zeros(Bool, size(model)[2])
-        ∂Y = jacobian_sequence(model, ss, ε; backend)
-        ∂E = DifferentiationInterface.jacobian(x -> model([ss ss ss], x), backend, ε)
-        return new{M}(∂Y, ∂E)
+        model::RationalExpectationsModel, parameters; backend=AutoForwardDiff()
+    )
+        ε = zeros(Bool, length(model.shocks))
+        nil_shocks = [ε ε ε]
+        ss = steady_state(model, parameters)
+
+        ∂Y = cat(
+            jacobian(x -> model([ss ss x], nil_shocks, parameters), backend, ss),
+            jacobian(x -> model([ss x ss], nil_shocks, parameters), backend, ss),
+            jacobian(x -> model([x ss ss], nil_shocks, parameters), backend, ss),
+            dims = 3
+        )
+        ∂E = jacobian(x -> model([ss ss ss], [ε x ε], parameters), backend, ε)
+        return new(∂Y, ∂E)
     end
 end
 
@@ -127,7 +135,7 @@ function solve(system::FirstOrderPerturbation, algo::QuadraticIteration)
     return ghx, (A * ghx + B) \ -system.∂E
 end
 
-function solve(model::RationalExpectationsModel, ::Val{1}; algo=QZ(), kwargs...)
-    system = FirstOrderPerturbation(model; kwargs...)
+function solve(model::RationalExpectationsModel, params, ::Val{1}; algo=QZ(), kwargs...)
+    system = FirstOrderPerturbation(model, params; kwargs...)
     return solve(system, algo)
 end
