@@ -1,7 +1,9 @@
 using DynamicMacroeconomics
 using Turing, Distributions, Random
 using GeneralisedFilters
-using StatsPlots
+
+# for plotting MCMC chains with Makie.jl instead of Plots.jl
+include("../utilities/mcmc_plots.jl");
 
 @block function productivity_process(z, ε)
     z[t] = ρ * z[t-1] + σ * ε[t]
@@ -61,5 +63,5 @@ x, y = sample(rng, true_model, 100);
 end;
 
 # this can be a little finnicky at times, so you may need to run it again
-chain = sample(rbc_estimation(y), NUTS(), 2_000);
-plot(chain)
+chain = sample(rbc_estimation(y), NUTS(), MCMCThreads(), 2_000, 3);
+plot(chain, collect(θ[chain.name_map[:parameters]]); size=(900, 900))
