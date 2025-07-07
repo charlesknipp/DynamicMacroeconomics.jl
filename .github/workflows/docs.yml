@@ -25,7 +25,10 @@ jobs:
           version: '1.11'
       - uses: julia-actions/cache@v2
       - name: Install dependencies
-        shell: julia --project=DynamicMacroeconomics/docs/ {0}
+        # shell: julia --color=yes --project=DynamicMacroeconomics/docs {0}
+        # run: julia --project=DynamicMacroeconomics/docs/ -e 'using Pkg; println(pwd()); Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
+        # run: julia --project=DynamicMacroeconomics/docs/ -e 'using Pkg; Pkg.develop(path="DynamicMacroeconomics/"); Pkg.instantiate()'
+        shell: julia --project=DynamicMacroeconomics/docs/ -e {0}
         run: |
           using Pkg
           
