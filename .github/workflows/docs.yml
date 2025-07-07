@@ -22,14 +22,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: julia-actions/setup-julia@v2
         with:
-          version: '1'
+          version: '1.11'
       - uses: julia-actions/cache@v2
-      # - name: Install dependencies
-      #   shell: julia --color=yes --project=DynamicMacroeconomics/docs {0}
-      #   run: |
-      #     using Pkg
-      #     Pkg.develop(PackageSpec(path=pwd()))
-      #     Pkg.instantiate()
+      - name: Install dependencies
+        shell: julia --color=yes --project=DynamicMacroeconomics/docs {0}
+        run: |
+          using Pkg
+          Pkg.instantiate()
       - name: Build and deploy
         run: julia --color=yes --project=DynamicMacroeconomics/docs DynamicMacroeconomics/docs/make.jl
         env:
