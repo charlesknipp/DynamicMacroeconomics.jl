@@ -6,13 +6,13 @@ using DifferentiationInterface
 import ForwardDiff
 ```
 
-Consider a perfectly competitive economy where households directly supply their capital reserves $K_{t-1}$ and labor hours $L_{t}$ to firms, who produce goods $Y_{t}$ according to a production plan $f(Z_{t}, K_{t-1}, L_{t})$ with exogenous productivity $Z_{t}$.
+Consider a perfectly competitive economy where households directly supply their capital reserves $K_{t-1}$ and labor hours $L_{t}$ to firms, who produce goods $Y_{t}$ according to a production plan $Y_{t} = f(Z_{t}, K_{t-1}, L_{t})$ with exogenous productivity $Z_{t}$.
 
 This is called the *RBC Model* where $f$ is chosen to reflect perfect competition, and households / firms instantaneously react to changes in prices for capital $r_{t}$ and labor $w_{t}$.
 
 ## Firms
 
-Firms pay households $(r_{t}, w_{t})$ for $(K_{t-1}, L_{t})$ to produce $Y_{t}$ and maximize profits:
+Firms pay households $(r_{t}, w_{t})$ for $(K_{t-1}, L_{t})$ to produce $Y_{t}$ and maximize profits (revenue minus costs):
 
 ```math
 \begin{aligned}
@@ -27,7 +27,7 @@ Consider, for example, a Cobb-Douglas production function $f(Z_{t}, K_{t-1}, L_{
 r_{t} = \alpha Z_{t} K_{t-1}^{\alpha-1} L_{t}^{1-\alpha} \quad w_{t} = (1-\alpha) Z_{t} K_{t-1}^{\alpha} L_{t}^{-\alpha}
 ```
 
-Note that in a perfectly competitive economy $Y_{t} = r_{t} K_{t-1} + w_{t} L_{t}$ which can be validated by substituting the Cobb-Douglas production into the above expressions.
+Note that in a perfectly competitive economy $Y_{t} = r_{t} K_{t-1} + w_{t} L_{t}$ which we can check by manipulating the above expressions.
 
 ## Households
 
@@ -39,19 +39,18 @@ Households spend last periods earnings $r_{t} K_{t-1} + w_{t} L_{t}$ to either s
 	& K_{t} = I_{t} + (1 - \delta) K_{t-1}
 \end{aligned}
 ```
-which can be combined to a single *Walrasian* constraint
+which can be combined to a single constraint
 ```math
 \max \sum \beta^{t} u(C_{t}, L_{t}) \quad \text{s.t.} \quad K_{t} = w_{t} L_{t} + (r_{t}+1-\delta) K_{t-1} - C_{t}
 ```
 
-Solving this problem yields the following dynamics
+Solving this problem yields the following (forward looking) dynamics
 ```math
 \begin{align}
 	\partial u / \partial C_{t+1} &= \partial u / \partial C_{t} \ \beta \left(r_{t} + 1 - \delta \right) \\
 	-\partial u / \partial L_{t} &= \partial u / \partial C_{t} \ w_{t}
 \end{align}
 ```
-which represent the labor and capital supply functions.
 
 **Note:** utility functions are more abstract than production plans since they reflect a preference order on $(C_{t}, L_{t})$, where $u$ is isotone in $C_{t}$ and antitone in $L_{t}$ see [here](https://en.wikipedia.org/wiki/Ordinal_utility) for more details.
 
@@ -59,7 +58,7 @@ Here, I use an isoelastic utility function
 ```math
 u(C_{t}, L_{t}) = \frac{C_{t}^{1 - \gamma}}{1 - \gamma} - \frac{L_{t}^{1 + \nu}}{1 + \nu}
 ```
-which has additively separable preferences (important for later).
+which has additively separable preferences.
 
 ## Optimality Conditions
 
@@ -75,12 +74,12 @@ To summarize, the model exhibits the following dynamics according to both househ
 \end{aligned}
 ```
 
-There are a few simplifying assumptions we can make to more briefly describe the transition dynamics for both households and firms.
+There are a few simplifying assumptions we can make to more briefly describe the transition dynamics.
 
 - Let $L_{t} = 1$ which implies that households are salaried (recall $L_{t}$ is hours worked)
 - Firms are perfectly competitive, therefore $Y_{t} = r_{t} K_{t-1} + w_{t} L_{t} \implies Y_{t} = C_{t} + I_{t}$
 
-With these simplifications, we can reduce the model to the following dynamics:
+With these simplifications, we can reduce the model to the following optimality conditions:
 ```math
 \begin{aligned}
 	\partial u / \partial C_{t+1} &= \partial u / \partial C_{t} \ \beta \ \left(\partial f / \partial K_{t-1} + 1 - \delta \right) \\
@@ -103,7 +102,7 @@ Let's finally address the mostly neglected exogenous component $Z_{t}$, by const
 ```
 with $\varepsilon_{t} \sim N(0, 1)$.
 
-Said shocks are essential in capturing business cycle dynamics exogenously, hence the name "real business cycle" or RBC.
+Said shocks are essential in capturing business cycle dynamics exogenously, hence the name *Real Business Cycle*.
 
 ## Defining the Model in `DynamicMacroeconomics`
 
@@ -144,7 +143,7 @@ end;
 nothing # hide
 ```
 
-With the steady state calculation defined, we have enough to materialize the RBC model.
+With the steady state calculation defined, we have enough to materialize the RBC model with exogenous shock $\varepsilon$.
 
 ```@example rbc
 θ = (
