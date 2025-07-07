@@ -46,10 +46,10 @@ which can be combined to a single constraint
 
 Solving this problem yields the following (forward looking) dynamics
 ```math
-\begin{align}
+\begin{aligned}
 	\partial u / \partial C_{t+1} &= \partial u / \partial C_{t} \ \beta \left(r_{t} + 1 - \delta \right) \\
 	-\partial u / \partial L_{t} &= \partial u / \partial C_{t} \ w_{t}
-\end{align}
+\end{aligned}
 ```
 
 **Note:** utility functions are more abstract than production plans since they reflect a preference order on $(C_{t}, L_{t})$, where $u$ is isotone in $C_{t}$ and antitone in $L_{t}$ see [here](https://en.wikipedia.org/wiki/Ordinal_utility) for more details.
