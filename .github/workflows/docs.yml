@@ -25,9 +25,17 @@ jobs:
           version: '1.11'
       - uses: julia-actions/cache@v2
       - name: Install dependencies
-        # shell: julia --color=yes --project=DynamicMacroeconomics/docs {0}
-        # run: julia --project=DynamicMacroeconomics/docs/ -e 'using Pkg; println(pwd()); Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
-        run: julia --project=DynamicMacroeconomics/docs/ -e 'using Pkg; Pkg.develop(path="DynamicMacroeconomics/"); Pkg.instantiate()'
+        shell: julia --project=DynamicMacroeconomics/docs/ -e
+        run: |
+          using Pkg
+          
+          Pkg.add([
+            PackageSpec(name="SSMProblems", rev="ck/priors"),
+            PackageSpec(name="GeneralisedFilters", rev="ck/priors")
+          ])
+          
+          Pkg.develop(path="DynamicMacroeconomics/")
+          Pkg.instantiate()
       - name: Build and deploy
         run: julia --color=yes --project=DynamicMacroeconomics/docs DynamicMacroeconomics/docs/make.jl
         env:
