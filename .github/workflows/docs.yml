@@ -28,15 +28,18 @@ jobs:
         # shell: julia --color=yes --project=DynamicMacroeconomics/docs {0}
         # run: julia --project=DynamicMacroeconomics/docs/ -e 'using Pkg; println(pwd()); Pkg.develop(PackageSpec(path=pwd())); Pkg.instantiate()'
         # run: julia --project=DynamicMacroeconomics/docs/ -e 'using Pkg; Pkg.develop(path="DynamicMacroeconomics/"); Pkg.instantiate()'
-        shell: julia --project=DynamicMacroeconomics/docs/ -e {0}
+        shell: julia --project=DynamicMacroeconomics/docs/ {0}
         run: |
           using Pkg
-          
-          Pkg.add([
+
+          download_ssm_packages() = Pkg.add([
             PackageSpec(name="SSMProblems", rev="ck/priors"),
             PackageSpec(name="GeneralisedFilters", rev="ck/priors")
           ])
-          
+
+          Pkg.activate("DynamicMacroeconomics/")
+          download_ssm_packages()
+
           Pkg.develop(path="DynamicMacroeconomics/")
           Pkg.instantiate()
       - name: Build and deploy
