@@ -11,3 +11,8 @@ MatrixEquations = "99c1a7ee-ab34-5fd5-8076-27c950a045f4"
 OffsetArrays = "6fe1bfb0-de20-5000-8ca7-80f57d26f881"
 SSMProblems = "26aad666-b158-4e64-9d35-0e672562fa48"
 Turing = "fce5fe82-541a-59a6-adf8-730c64b5f9a0"
+
+[sources]
+GeneralisedFilters = {url = "https://github.com/TuringLang/SSMProblems.jl.git", subdir = "GeneralisedFilters", rev = "ck/priors"}
+SSMProblems = {url = "https://github.com/TuringLang/SSMProblems.jl.git", subdir = "SSMProblems", rev = "ck/priors"}
+DynamicMacroeconomics = {path = "DynamicMacroeconomics/"}

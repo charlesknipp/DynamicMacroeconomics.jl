@@ -10,7 +10,7 @@ As a departure to `DifferentiableStateSpaceModels.jl`, this module is entirely s
 
 Upon cloning this repository, we have to properly set up the environment to support the local execution of this interface; furthermore, we also rely on a development branch of `GeneralisedFilters.jl` for functional automatic differentiation.
 
-To set this up, simply run the script `julia setup.jl` in your terminal. This should only need to occur once until I get this PR finally merged.
+To set this up, instantiate the environment described in [Project.toml](https://github.com/charlesknipp/DynamicMacroeconomics.jl/blob/main/Project.toml), by running `Using Pkg; Pkg.activate("."); Pkg.instantiate()` if not activated automatically.
 
 ## A Simple Demonstration
 
