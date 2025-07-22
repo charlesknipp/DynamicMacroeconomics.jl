@@ -3,39 +3,100 @@ using SSMProblems, GeneralisedFilters
 using Distributions
 using Turing
 
+const GF = GeneralisedFilters
+
+## PREFACE #################################################################################
+
+#=
+This code is entirely generalizable, therefore it supports any state space model defined in
+the SSMProblems interface. I use my specific branch of which for type consistent initial
+state priors.
+
+Therefore the user can define custom objects for both LatentDynamics and ObservationProcess,
+and set the return type of a DPPL model to the SSM. This allows the generalized algorithms
+to operate entirely within the Turing ecosystem.
+
+NOTE: there is some additional overhead with this approach since the probablistic model
+contains domain transformation dependent on operations performed on the stochastic nodes. I
+have been working on a module that does this generalization without the overhead, but it is
+still nascant and not yet ready for this type of analysis.
+
+After benchmarking the latest version it takes about an hour for the direct iteration, and 
+two minutes for the Kalman filter. There are further optimizations I can make, but for now
+pay attention only to the relative timing.
+=#
+
+## PLOTS ###################################################################################
+
 # for plotting MCMC chains with Makie.jl instead of Plots.jl
 include("../utilities/mcmc_plots.jl");
 
-## DFM EXAMPLE #############################################################################
+get_means(vals) = hcat(getproperty.(vals, Ref(:μ))...)
 
-# in the original code Babur originally set R = Diagonal([0.3, 0.4, 0.5, 0.4, 0.6]) and
-# λs = [0.8, -0.3, 0.6, 1.2], where Λ = [1; λs]
-
-function dynamic_factor_model(loadings::Vector{ΛT}, σ::ΣT) where {ΛT<:Real, ΣT<:Real}
-    ny = length(loadings) + 1
-    nx = 1
-
-    # transition process is mean reverting random walk
-    A = [0.85;;]
-    Q = Diagonal([0.4])
-
-    # factor loading normalized such that Λ[1] = 1 and measurement noise is iid
-    Λ = reshape([1; loadings], ny, 1)
-    Σ = Diagonal(σ * ones(ny))
-
-    # recall that lyapd is non-differentiable (copy rrule from ControlSystems.jl)
-    return create_homogeneous_linear_gaussian_model(
-        zeros(ΛT, 1), lyapd(A, Q), A, zeros(ΛT, nx), Q, Λ, zeros(ΣT, ny), Σ
+function plot_kalman_smoother(states)
+    # collect only the mean from the smoother
+    gaussian_means = cat(
+        [cat(get_means.(states[:, i])..., dims=3) for i in axes(states, 2)]..., dims=4
     )
+
+    # nx × T × chain_length × num_chains
+    mean_arr = mean(gaussian_means, dims=3)
+    fig = Figure()
+    
+    for i in axes(mean_arr, 1)
+        ax = Axis(fig[1, i])
+        lines!.(Ref(ax), eachslice(mean_arr[i, :, 1, :], dims=2))
+    end
+    return fig
 end
 
-## DIRECT ITERATION SOLVER #################################################################
+# NOTE: this only works for 1 dimensional states...
+function plot_direct_iteration(chain)
+    # TODO: update the naming convention to order by var then time index
+    state_chain = group(chain, :x)
+    
+    fig = Figure()
+    ax = Axis(fig[1, 1])
+    
+    for i in 1:size(chain, 3)
+        mean_arrs = mean(state_chain, append_chains=false)[i][:, 2]
+        lines!(ax, mean_arrs)
+    end
+    return fig
+end
 
-@model function dfm_direct_iteration(data)
-    λs ~ MvNormal(0.1I(length(data[1]) - 1))
-    ssm = dynamic_factor_model(λs, 0.2)
+## KALMAN SMOOTHER #########################################################################
 
-    # sample from the state space model directly
+# modified kalman smoother from GF that stores the entire history
+function smoother(
+    model::GF.LinearGaussianStateSpaceModel,
+    algo::KalmanSmoother,
+    observations::AbstractVector;
+    kwargs...,
+)
+    cache = GF.StateCallback(nothing, nothing)
+    filtered, logZ = GF.filter(
+        model, KF(), observations; callback=cache, kwargs...
+    )
+
+    rng = Random.default_rng()
+    back_state = filtered
+    smoothed_cache = fill(deepcopy(back_state), length(observations))
+
+    for t in (length(observations) - 1):-1:1
+        back_state = GF.backward(
+            rng, model, algo, t, back_state, observations[t]; states_cache=cache, kwargs...
+        )
+        smoothed_cache[t] = back_state
+    end
+
+    return smoothed_cache, logZ
+end
+
+## POSTERIOR SOLVERS #######################################################################
+
+@model function direct_iteration(state_space, data)
+    ssm ~ to_submodel(state_space, false)
     x0 ~ SSMProblems.distribution(ssm.prior)
     x = OffsetVector(fill(x0, length(data) + 1), -1)
     for t in eachindex(data)
@@ -44,28 +105,67 @@ end
     end
 end
 
-## MARGINAL LIKELIHOOD SOLVER ##############################################################
-
-@model function dfm_marginalization(data)
-    λs ~ MvNormal(0.1I(length(data[1]) - 1))
-    ssm = dynamic_factor_model(λs, 0.2)
-
-    # run a filtering algorithm (here we use the Kalman filter)
+@model function marginalization(state_space, data)
+    ssm ~ to_submodel(state_space, false)
     _, logZ = GeneralisedFilters.filter(ssm, KF(), data)
     Turing.@addlogprob! logZ
 end
 
+@model function smooth_marginalization(state_space, data)
+    ssm ~ to_submodel(state_space, false)
+    states, logZ = smoother(ssm, KalmanSmoother(), data)
+    Turing.@addlogprob! logZ
+    return states
+end
+
+## DFM EXAMPLE #############################################################################
+
+# in the original code Babur originally set R = Diagonal([0.3, 0.4, 0.5, 0.4, 0.6]) and
+# λs = [0.8, -0.3, 0.6, 1.2], where Λ = [1; λs]
+
+@model function dynamic_factor_model(ny::Int, σ::ΣT) where {ΣT<:Real}
+    # random variables defined with a ~ operator
+    λs ~ MvNormal(0.1I(ny - 1))
+
+    # transition process is mean reverting random walk
+    A = [0.85;;]
+    Q = 0.4I(1)
+
+    # factor loading normalized such that Λ[1] = 1 and measurement noise is iid
+    Λ = reshape([1; λs], ny, 1)
+    Σ = Diagonal(σ * ones(ny))
+
+    # return the homogeneous linear Gaussian state space model
+    return SSMProblems.StateSpaceModel(
+        GF.HomogeneousGaussianPrior(zeros(ΣT, 1), lyapd(A, Q)),
+        GF.HomogeneousLinearGaussianLatentDynamics(A, zeros(ΣT, 1), Q),
+        GF.HomogeneousLinearGaussianObservationProcess(Λ, zeros(ΣT, ny), Σ)
+    )
+end
+
 ## BENCHMARKS ##############################################################################
 
-# data generating process with low measurement noise
-true_λs = randn(9);
-true_model = dynamic_factor_model(true_λs, 0.2);
-_, ys = sample(true_model, 250);
+# define the baseline model
+state_space = dynamic_factor_model(10, 0.2)
+
+# simulate
+true_λs = randn(9)
+true_model = state_space | (; λs = true_λs)
+_, ys = sample(true_model(), 250)
 
 # 1813.56 seconds
-chain_1 = sample(dfm_direct_iteration(ys), NUTS(), MCMCThreads(), 500, 3);
+chain_1 = sample(direct_iteration(state_space, ys), NUTS(), MCMCThreads(), 500, 3);
 plot(group(chain_1, :λs), true_λs; size=(600, 1200))
 
 # 92.96 seconds
-chain_2 = sample(dfm_marginalization(ys), NUTS(), MCMCThreads(), 500, 3);
+chain_2 = sample(marginalization(state_space, ys), NUTS(), MCMCThreads(), 500, 3);
 plot(group(chain_2, :λs), true_λs; size=(600, 1200))
+
+## PLOTS ###################################################################################
+
+# plot direct iteration
+plot_direct_iteration(chain_1)
+
+# plot kalman smoother
+states = returned(smooth_marginalization(state_space, ys), chain_2);
+plot_kalman_smoother(states)
