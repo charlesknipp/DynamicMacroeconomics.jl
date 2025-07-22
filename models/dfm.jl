@@ -21,9 +21,8 @@ contains domain transformation dependent on operations performed on the stochast
 have been working on a module that does this generalization without the overhead, but it is
 still nascant and not yet ready for this type of analysis.
 
-After benchmarking the latest version it takes about an hour for the direct iteration, and 
-two minutes for the Kalman filter. There are further optimizations I can make, but for now
-pay attention only to the relative timing.
+BABUR: focus on the block defined on line 124, this is where the state space is defined and
+where most of your work will be relevant.
 =#
 
 ## PLOTS ###################################################################################
@@ -44,7 +43,7 @@ function plot_kalman_smoother(states)
     fig = Figure()
     
     for i in axes(mean_arr, 1)
-        ax = Axis(fig[1, i])
+        ax = Axis(fig[1, i], title="Kalman Smoother")
         lines!.(Ref(ax), eachslice(mean_arr[i, :, 1, :], dims=2))
     end
     return fig
@@ -56,7 +55,7 @@ function plot_direct_iteration(chain)
     state_chain = group(chain, :x)
     
     fig = Figure()
-    ax = Axis(fig[1, 1])
+    ax = Axis(fig[1, 1], title="Direct Iteration")
     
     for i in 1:size(chain, 3)
         mean_arrs = mean(state_chain, append_chains=false)[i][:, 2]
@@ -123,9 +122,10 @@ end
 # in the original code Babur originally set R = Diagonal([0.3, 0.4, 0.5, 0.4, 0.6]) and
 # λs = [0.8, -0.3, 0.6, 1.2], where Λ = [1; λs]
 
-@model function dynamic_factor_model(ny::Int, σ::ΣT) where {ΣT<:Real}
+@model function dynamic_factor_model(ny::Int)
     # random variables defined with a ~ operator
     λs ~ MvNormal(0.1I(ny - 1))
+    σ  ~ Beta()
 
     # transition process is mean reverting random walk
     A = [0.85;;]
@@ -137,31 +137,31 @@ end
 
     # return the homogeneous linear Gaussian state space model
     return SSMProblems.StateSpaceModel(
-        GF.HomogeneousGaussianPrior(zeros(ΣT, 1), lyapd(A, Q)),
-        GF.HomogeneousLinearGaussianLatentDynamics(A, zeros(ΣT, 1), Q),
-        GF.HomogeneousLinearGaussianObservationProcess(Λ, zeros(ΣT, ny), Σ)
+        GF.HomogeneousGaussianPrior(zeros(1), lyapd(A, Q)),
+        GF.HomogeneousLinearGaussianLatentDynamics(A, zeros(1), Q),
+        GF.HomogeneousLinearGaussianObservationProcess(Λ, zeros(ny), Σ)
     )
 end
 
 ## BENCHMARKS ##############################################################################
 
-# define the baseline model
-state_space = dynamic_factor_model(10, 0.2)
+# define the baseline model (suppose we know σ)
+state_space = dynamic_factor_model(10) | (; σ = 0.2)
 
-# simulate
+# simulate from a provided vector of factor loadings
 true_λs = randn(9)
 true_model = state_space | (; λs = true_λs)
 _, ys = sample(true_model(), 250)
 
-# 1813.56 seconds
+# 947.20 seconds
 chain_1 = sample(direct_iteration(state_space, ys), NUTS(), MCMCThreads(), 500, 3);
 plot(group(chain_1, :λs), true_λs; size=(600, 1200))
 
-# 92.96 seconds
+# 91.98 seconds
 chain_2 = sample(marginalization(state_space, ys), NUTS(), MCMCThreads(), 500, 3);
 plot(group(chain_2, :λs), true_λs; size=(600, 1200))
 
-## PLOTS ###################################################################################
+## COMPARE STATES ##########################################################################
 
 # plot direct iteration
 plot_direct_iteration(chain_1)
