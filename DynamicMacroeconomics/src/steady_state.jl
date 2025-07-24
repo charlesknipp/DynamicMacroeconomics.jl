@@ -6,11 +6,11 @@ struct SteadyStateModel{N}
 end
 
 function Base.show(io::IO, model::SteadyStateModel)
-    println(io, "SteadyStateModel:")
+    print(io, "SteadyStateModel:")
     for block in model.base_model.blocks
         inputs = show_variables(block.inputs)
         outputs = show_variables(block.outputs)
-        println(io, " ($inputs) → ($outputs)")
+        print(io, "\n ($inputs) → ($outputs)")
     end
 end
 
