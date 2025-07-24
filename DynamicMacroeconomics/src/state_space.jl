@@ -1,4 +1,4 @@
-export LinearGaussianControllableDynamics
+export state_space, LinearGaussianControllableDynamics
 
 struct LinearGaussianControllableDynamics <: LinearGaussianLatentDynamics
     A
@@ -30,36 +30,6 @@ function SSMProblems.distribution(
     return StructuralMvNormal(A * state, dyn.B)
 end
 
-# struct LinearGaussianControllableObservation <: LinearGaussianObservationProcess
-#     C
-#     D
-# end
-
-# function GeneralisedFilters.calc_H(
-#     obs::LinearGaussianControllableObservation, ::Int; kwargs...
-# )
-#     return obs.C
-# end
-
-# function GeneralisedFilters.calc_c(
-#     obs::LinearGaussianControllableObservation, ::Int; kwargs...
-# )
-#     return zeros(Bool, size(obs.C, 1))
-# end
-
-# function GeneralisedFilters.calc_R(
-#     obs::LinearGaussianControllableObservation, ::Int; kwargs...
-# )
-#     return obs.D * obs.D'
-# end
-
-# function SSMProblems.distribution(
-#     obs::LinearGaussianControllableObservation, step::Integer, state::AbstractVector; kwargs...
-# )
-#     H = GeneralisedFilters.calc_H(obs, step; kwargs...)
-#     return StructuralMvNormal(H * state, obs.D)
-# end
-
 """
     state_space(model, parameters, observations, order; noise, kwargs...)
 
@@ -70,7 +40,7 @@ is set by default to order = 1.
 See also [`solve`](@ref)..
 """
 function state_space(
-    model::RationalExpectationsModel,
+    model::GraphicalModel,
     parameters,
     observations,
     order::Int = 1;
@@ -81,26 +51,26 @@ function state_space(
 end
 
 function state_space(
-    model::RationalExpectationsModel, parameters, observations, order, noise; kwargs...
+    model::GraphicalModel, parameters, observations, order, noise; kwargs...
 )
     error("higher order state space models not yet supported")
 end
 
-# TODO: define a rrule for `lyapd` to use analytical covariance
-function state_space(
-    model::RationalExpectationsModel, parameters, observations, ::Val{1}, noise; kwargs...
-)
-    nx, ny = length(model.states), length(observations)
-    A, B = solve(model, parameters, 1; kwargs...)
-    C = I(nx)[indexin(observations, [model.states...]), :]
-    T = Base.promote_eltype(A, B)
-    # Σ0 = lyapd(A, B * B' + 1e-12I)
+# # TODO: define a rrule for `lyapd` to use analytical covariance
+# function state_space(
+#     model::GraphicalModel, parameters, observations, ::Val{1}, noise; kwargs...
+# )
+#     nx, ny = length(model.states), length(observations)
+#     A, B = solve(model, parameters, 1; kwargs...)
+#     C = I(nx)[indexin(observations, [model.states...]), :]
+#     T = Base.promote_eltype(A, B)
+#     # Σ0 = lyapd(A, B * B' + 1e-12I)
 
-    return SSMProblems.StateSpaceModel(
-        GeneralisedFilters.HomogeneousGaussianPrior(zeros(T, nx), I(nx)),
-        LinearGaussianControllableDynamics(A, B),
-        GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(
-            C, zeros(Bool, ny), noise * I(ny)
-        )
-    )
-end
+#     return SSMProblems.StateSpaceModel(
+#         GeneralisedFilters.HomogeneousGaussianPrior(zeros(T, nx), I(nx)),
+#         LinearGaussianControllableDynamics(A, B),
+#         GeneralisedFilters.HomogeneousLinearGaussianObservationProcess(
+#             C, zeros(Bool, ny), noise * I(ny)
+#         )
+#     )
+# end

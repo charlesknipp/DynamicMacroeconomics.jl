@@ -109,16 +109,19 @@ Said shocks are essential in capturing business cycle dynamics exogenously, henc
 With Cobb-Douglas production and an isoelastic utility, we can define the RBC model in full like so:
 
 ```@example rbc
-@block function productivity_process(z, ε)
-    z[t] = ρ * z[t-1] + σ * ε[t]
+@simple function households(C, K, Z, α, β, γ, δ)
+    euler = (C ^ -γ) - (β * (α * lead(Z) * K ^ (α - 1) + 1 - δ) * (lead(C) ^ -γ))
+    return euler
 end;
 
-@block function euler_equation(c, k, z)
-    (c[t] ^ -γ) = (c[t+1] ^ -γ) * β * (α * exp(z[t+1]) * k[t] ^ (α - 1) + (1 - δ))
+@simple function firms(Z, K, C, α, δ)
+    walras = (Z * lag(K) ^ α - C) + (1 - δ) * lag(K) - K
+    return walras
 end;
 
-@block function budget_dynamics(c, k, z)
-    k[t] = (exp(z[t]) * k[t-1]^α - c[t]) + (1 - δ) * k[t-1]
+@simple function shocks(Z, ρ)
+    ε = log(Z) - ρ * log(lag(Z))
+    return ε
 end;
 nothing # hide
 ```
@@ -131,32 +134,13 @@ The first step to solving the model is obtaining the solution to the steady stat
 
 Essentially, you take the optimality conditions $F(Z_{t},K_{t},C_{t})$ and let $X^{*} = X_{t} = X_{t+1}$ be the steady state value for $X = \{ Z, K, C \}$.
 
-**Note:** for numerical computation, this can be done with some simple root finding algorithms in most settings; but for speed, I calculate this by hand which is reflected in the following code.
-
-```@example rbc
-function analytical_steady_state(θ)
-    (; β, α, δ) = θ
-    kss = ((1 / β - 1 + δ) / α) ^ (1 / (α - 1))
-    css = kss ^ α - δ * kss
-    return (c=css, k=kss, z=0)
-end;
-nothing # hide
-```
-
 With the steady state calculation defined, we have enough to materialize the RBC model with exogenous shock $\varepsilon$.
 
 ```@example rbc
-θ = (
-    β = 1/1.05,
-    α = 0.30,
-    δ = 0.25,
-    γ = 1.00,
-    σ = 1.00,
-    ρ = 0.80
-);
-
-rbc_model = RationalExpectationsModel(
-    [productivity_process, budget_dynamics, euler_equation], analytical_steady_state, [:ε]
+rbc_model = solve(
+    model(households, firms, shocks),
+    (C=1.0, K=1.0, Z=1.0),
+    (γ=1.00, α=0.30, δ=0.25, β=(1/1.05), ρ=0.80)
 );
 nothing # hide
 ```
@@ -219,6 +203,6 @@ This yields matrices $P$ and $Q$ which defines the state transition for a first 
 
 Using `DynamicMacroeconomics`, we can obtain these matrices and construct a `SSMProblems` compatible state space (as a vector autoregression) like so:
 ```@example rbc
-P, Q = solve(rbc_model, θ, 1; algo=QuadraticIteration(), backend=AutoForwardDiff())
+P, Q = solve(rbc_model, [:K, :C, :Z], [:ε], 1; algo=QuadraticIteration())
 VAR  = LinearGaussianControllableDynamics(P, Q)
 ```

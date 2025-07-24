@@ -11,197 +11,173 @@ using LinearAlgebra
 using DifferentiationInterface
 import ForwardDiff
 
+using NonlinearSolve
+
 using Reexport
 using MacroTools
+using Graphs
 
 @reexport using SSMProblems, GeneralisedFilters
 
-export RationalExpectationsModel, steady_state, solve, @block, state_space
+export model, @simple, lead, lag
 
-struct Block
-    params::Set{Symbol}
-    states::Set{Symbol}
-    offsets::Dict{Int,Set{Symbol}}
-    dynamics::Expr
+# for steady state evaluations
+lead(x::Real) = x
+lag(x::Real) = x
+contemp(x::Real) = x
+
+# for partial derivatives
+lead(x::AbstractVector{<:Real}) = x[3]
+lag(x::AbstractVector{<:Real}) = x[1]
+contemp(x::AbstractVector{<:Real}) = x[2]
+
+abstract type AbstractBlock end
+
+# only simple blocks are currently defined
+struct SimpleBlock{FT,NU,NO,MT} <: AbstractBlock
+    functor::FT
+    inputs::NTuple{NU,Symbol}
+    outputs::NTuple{NO,Symbol}
+    metadata::MT
 end
 
-macro block(args...)
-    block_dict = splitdef(args[end])
+inputs(block::SimpleBlock) = block.inputs
+outputs(block::SimpleBlock) = block.outputs
 
-    # get states and parameters
-    params = symwalk(block_dict[:body])
-    states = Set{Symbol}(block_dict[:args])
-
-    # define a block object with the function name
-    offsets, dynamics = parse_block(block_dict[:body])
-    assignment = Expr(:(=), block_dict[:name], Block(params, states, offsets, dynamics))
-    return esc(assignment)
+function show_variables(vars::NTuple{N,Symbol}) where {N}
+    join(vars, ", ")
 end
 
-function parse_block(expr::Expr)
-    offsets = Dict{Int,Set{Symbol}}([
-        (-1, Set{Symbol}()), (0, Set{Symbol}()), (1, Set{Symbol}())
-    ])
+function Base.show(io::IO, b::SimpleBlock)
+    block_name = split(string(typeof(b.functor).name.name), "#"; keepempty=false)[2]
+    inputs = show_variables(b.inputs)
+    outputs = show_variables(b.outputs)
+    print(io, "$block_name: ($inputs) → ($outputs)")
+end
 
-    # capture timings for use in perturbation methods
-    MacroTools.postwalk(expr) do ex
-        if @capture(ex, var_[idx_])
-            id = @eval $(Expr(:block, :(local t=0), ex.args[2]))
-            offsets[id] = push!(offsets[id], var)
-            return var
+macro simple(args...)
+    # split the function definition
+    func_def = MacroTools.splitdef(args[end])
+
+    # extract the name to define the block
+    block_name = func_def[:name]
+    inputs = tuple(func_def[:args]...)
+
+    # build an anonymous function call with gensym("functor")
+    functor = gensym(func_def[:name])
+    func_def[:name] = functor
+    outputs = build_expression!(func_def)
+
+    # grab the offsets and store that in metadata
+    metadata = setdiff(func_def[:args], inputs)
+
+    # return the quoted expression
+    return MacroTools.@q begin
+        $(MacroTools.combinedef(func_def))
+        $(esc(block_name)) = $(SimpleBlock)($(functor), $(inputs), $(outputs), $(metadata))
+    end
+end
+
+function build_expression!(func_dict)
+    # capture the targets in the return statement
+    targets = Symbol[]
+    MacroTools.postwalk(func_dict[:body]) do ex
+        if @capture(ex, return target_)
+            if target isa Expr
+                push!(targets, target.args...)
+            else
+                push!(targets, target)
+            end
         else
             return ex
         end
     end
 
-    # convert from y = f(x) to 0 = y - f(x)
-    clean_block = MacroTools.postwalk(expr) do ex
-        if @capture(ex, lhs_ = rhs_)
-            return Expr(:call, :(-), lhs, rhs)
+    # encase time series with comtemp()
+    new_ex = MacroTools.postwalk(func_dict[:body]) do ex
+        if ex isa Symbol && ex in func_dict[:args]
+            return :(contemp($ex))
         else
             return ex
         end
     end
 
-    # remove LineNumberNodes and stack into an array
-    clean_expr = MacroTools.striplines(clean_block)
-    stacked_expr = if clean_expr.head == :block
-        Expr(:vcat, clean_expr.args...)
-    else
-        Expr(:vcat, clean_expr)
-    end
-
-    return offsets, stacked_expr
-end
-
-function collect_blocks(blocks)
-    stacked_blocks = Expr[]
-    offsets = Dict{Int,Set{Symbol}}([
-        (-1, Set{Symbol}()), (0, Set{Symbol}()), (1, Set{Symbol}())
-    ])
-
-    for block in blocks
-        update_timings!(offsets, block.offsets)
-        push!(stacked_blocks, block.dynamics.args...)
-    end
-
-    params = union(getproperty.(blocks, :params)...)
-    states = union(getproperty.(blocks, :states)...)
-
-    return Block(params, states, offsets, Expr(:vcat, stacked_blocks...))
-end
-
-symwalk!(list) = ex -> begin
-    if ex isa Symbol
-        # include any other problematic symbols
-        ex != :I && push!(list, ex)
-    end
-
-    if ex isa Expr
-        if ex.head == :call || ex.head == :macrocall
-            map(symwalk!(list), ex.args[2:end])
-        elseif ex.head == :ref
-            return list
+    # undo extraneous contemp calls for lags/leads
+    fixed_ex = MacroTools.postwalk(new_ex) do ex
+        if @capture(ex, f_(contemp(var_))) && f in [:lead, :lag]
+            return :($f($var))
         else
-            map(symwalk!(list), ex.args)
+            return ex
         end
     end
 
-    return list
+    func_dict[:body] = fixed_ex
+    return tuple(targets...)
 end
 
-symwalk(ex::Expr) = ex |> symwalk!(Set{Symbol}())
-
-function update_timings!(main_dict, sub_dict)
-    main_dict[-1] = union(main_dict[-1], sub_dict[-1])
-    main_dict[0]  = union(main_dict[0], sub_dict[0])
-    main_dict[1]  = union(main_dict[1], sub_dict[1])
-    return main_dict
+# makes blocks callable
+function (block::SimpleBlock)(x...)
+    out = block.functor(x...)
+    return NamedTuple{outputs(block)}(out)
 end
 
-"""
-    RationalExpectationsModel
+# TODO: this needs some work...
+function get_partials(block::SimpleBlock, ss::NamedTuple, backend=AutoForwardDiff())
+    invars = inputs(block)
+    ssvars = [ss[invars]...]
+    stacked_ss = repeat(ssvars, 1, 3)
 
-A collection of model equations which represent a dynamic stochastic general equilibrium
-model, where forward guidance is determined by information known up to the present.
+    ∂s = Dict()
+    for out in outputs(block)
+        ∇x = DifferentiationInterface.gradient(
+            x -> block(collect(eachrow(x))...)[out], backend, stacked_ss
+        )
 
-Note: only models with a known analytical steady state are considered.
-
-```julia
-model = RationalExpectationsModel(
-    [block_1, block_2, block_3],
-    [:ε_1, :ε_2],
-    steady_state_function
-)
-```
-
-See also [`steady_state`](@ref).
-"""
-struct RationalExpectationsModel{F,SST,NX,NE}
-    f::F
-    states::NTuple{NX,Symbol}
-    shocks::NTuple{NE,Symbol}
-    offsets::Dict{Int64,Set{Symbol}}
-    steady_state::SST
-end
-
-function (model::RationalExpectationsModel)(states, shocks, parameters, t::Int=2)
-    return model.f(states, shocks, parameters, t)
-end
-
-function (model::RationalExpectationsModel)(parameters)
-    steady_state = repeat(model.steady_state(parameters), 1, 3)
-    nil_shocks = zeros(length(model.shocks), 3)
-    return model(steady_state, nil_shocks, parameters)
-end
-
-function RationalExpectationsModel(
-    blocks::Vector{Block}, steady_state::ST, shock_vars
-) where {ST<:Function}
-    combined_block = collect_blocks(blocks)
-    state_vars = setdiff(combined_block.states, shock_vars)
-    conditions = combined_block.dynamics
-
-    steady_state_op = (θ) -> begin
-        ss = steady_state(θ)
-        T = Base.promote_eltypeof(ss...)
-        collect(T, ss[[state_vars...]])
+        ∂s[out] = Dict(zip(invars, eachrow(∇x)))
     end
+    return ∂s
+end
 
-    unpacked_params = Expr(:tuple, Expr(:parameters, combined_block.params...))
-    unpacked_states = Expr(:tuple, state_vars...)
-    unpacked_shocks = Expr(:tuple, shock_vars...)
+struct GraphicalModel{N,NU,NT}
+    dag::SimpleDiGraph
+    blocks::NTuple{N,AbstractBlock}
+    order::Vector{Int64}
 
-    dynamic_op = @eval (states, shocks, θ, t) -> begin
-        $(unpacked_params) = θ
-        $(unpacked_states) = eachrow(states)
-        $(unpacked_shocks) = eachrow(shocks)
-        $(conditions)
+    unknowns::NTuple{NU,Symbol}
+    targets::NTuple{NT,Symbol}
+end
+
+# TODO: improve pretty printing
+function Base.show(io::IO, model::GraphicalModel)
+    println(io, join(model.blocks, "\n"))
+end
+
+Base.length(::GraphicalModel{N}) where {N} = N
+
+Base.@propagate_inbounds Base.getindex(model::GraphicalModel, i) = model.blocks[model.order[i]]
+
+# take blocks and construct a digraph
+function model(blocks...)
+    pool = collect(blocks)
+    graph = SimpleDiGraph(length(pool))
+    for (n, block) in enumerate(pool)
+        for output in outputs(block)
+            m = findall(x -> in(output, x), inputs.(pool))
+            add_edge!.(Ref(graph), n, m)
+        end
     end
+    order = topological_sort(graph)
 
-    states = tuple(state_vars...)
-    shocks = tuple(shock_vars...)
+    invars = union((inputs(pool[i]) for i in order)...)
+    outvars = union((outputs(pool[i]) for i in order)...)
 
-    return RationalExpectationsModel(
-        dynamic_op, states, shocks, combined_block.offsets, steady_state_op
-    )
+    unknowns = tuple(setdiff(invars, outvars)...)
+    targets = tuple(setdiff(outvars, invars)...)
+
+    return GraphicalModel(graph, blocks, order, unknowns, targets)
 end
 
-"""
-    steady_state(model::RationalExpectationsModel, parameters)
-
-Compute the model's steady state, where the return abides by the ordering determined in the
-tuple containing the states `model.states`.
-
-Currently, this module only supports analytical steady states. Although this is under heavy
-consideration.
-
-See also [`RationalExpectationsModel`](@ref).
-"""
-function steady_state(model::RationalExpectationsModel, parameters)
-    return model.steady_state(parameters)
-end
-
+include("steady_state.jl")
 include("misc.jl")
 include("state_space.jl")
 include("perturbation_solutions.jl")

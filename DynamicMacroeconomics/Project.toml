@@ -8,18 +8,22 @@ DifferentiationInterface = "a0c0ee7d-e4b9-4e03-894e-1c5f64a51d63"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
 GeneralisedFilters = "3ef92589-7ab8-43f9-b5b9-a3a0c86ecbb7"
+Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 MacroTools = "1914dd2f-81c6-5fcd-8719-6d5c9610ff09"
 MatrixEquations = "99c1a7ee-ab34-5fd5-8076-27c950a045f4"
+NonlinearSolve = "8913a72c-1f9b-4ce2-8d82-65094dcecaec"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
 SSMProblems = "26aad666-b158-4e64-9d35-0e672562fa48"
 
+[sources]
+GeneralisedFilters = {rev = "ck/priors", subdir = "GeneralisedFilters", url = "https://github.com/TuringLang/SSMProblems.jl.git"}
+SSMProblems = {rev = "ck/priors", subdir = "SSMProblems", url = "https://github.com/TuringLang/SSMProblems.jl.git"}
+
 [compat]
 DifferentiationInterface = "0.7.1"
 ForwardDiff = "1.0.1"
+Graphs = "1.13.0"
 MacroTools = "0.5.16"
-
-[sources]
-GeneralisedFilters = {url = "https://github.com/TuringLang/SSMProblems.jl.git", subdir = "GeneralisedFilters", rev = "ck/priors"}
-SSMProblems = {url = "https://github.com/TuringLang/SSMProblems.jl.git", subdir = "SSMProblems", rev = "ck/priors"}
+NonlinearSolve = "4.10.0"
