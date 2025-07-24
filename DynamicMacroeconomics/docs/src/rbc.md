@@ -171,7 +171,7 @@ fig = Figure()
 ax = Axis(fig[1,1], title="RBC phase plot", limits=((0.1, klim), (0.1, clim)))
 
 hidedecorations!(ax)
-streamplot!(ax, rbc_dynamics(θ), 0.1..klim, 0.1..clim, colorscale=log, arrow_size=10)
+streamplot!(ax, rbc_dynamics, 0.1..klim, 0.1..clim, colorscale=log, arrow_size=10)
 
 save("rbc-phase-plot.png", fig)
 ```
