@@ -154,24 +154,25 @@ However, this approach is only *saddle-path stable*. Therefore, slight deviation
 ```@setup rbc
 using CairoMakie
 
-ss = NamedTuple{rbc_model.states}(steady_state(rbc_model, θ))
-
 # continuous time realization of the RBC model with productivity fixed at steady-state
-function rbc_dynamics(θ)
-    (; α, β, γ, δ) = θ
-    ss = NamedTuple{rbc_model.states}(steady_state(rbc_model, θ))
+function rbc_dynamics(k, c)
+    (; α, β, γ, δ, Z) = rbc_model.steady_state
     ρ = (inv(β) - 1)
-    return (k, c) -> Point(
-        (exp(ss[:z]) * k ^ α - c) - δ * k,
-        (1 / γ) * c * (α * exp(ss[:z]) * k ^ (α - 1) - δ - ρ)
+    return Point(
+        (Z * k ^ α - c) - δ * k,
+        (1 / γ) * c * (α * Z * k ^ (α - 1) - δ - ρ)
     )
 end
 
+ss = rbc_model.steady_state
+klim, clim = 2*ss[:K], 2*ss[:C] 
+
 fig = Figure()
-klim, clim = 2*ss[:k], 2*ss[:c] 
 ax = Axis(fig[1,1], title="RBC phase plot", limits=((0.1, klim), (0.1, clim)))
+
 hidedecorations!(ax)
 streamplot!(ax, rbc_dynamics(θ), 0.1..klim, 0.1..clim, colorscale=log, arrow_size=10)
+
 save("rbc-phase-plot.png", fig)
 ```
 
