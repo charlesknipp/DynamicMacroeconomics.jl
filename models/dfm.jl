@@ -1,6 +1,6 @@
 using LinearAlgebra, MatrixEquations, OffsetArrays
 using SSMProblems, GeneralisedFilters
-using Distributions
+using Distributions, Random
 using Turing
 
 const GF = GeneralisedFilters
@@ -16,13 +16,9 @@ Therefore the user can define custom objects for both LatentDynamics and Observa
 and set the return type of a DPPL model to the SSM. This allows the generalized algorithms
 to operate entirely within the Turing ecosystem.
 
-NOTE: there is some additional overhead with this approach since the probablistic model
-contains domain transformation dependent on operations performed on the stochastic nodes. I
-have been working on a module that does this generalization without the overhead, but it is
-still nascant and not yet ready for this type of analysis.
-
-BABUR: focus on the block defined on line 124, this is where the state space is defined and
-where most of your work will be relevant.
+NOTE: there is a minor type stability issue with the direct iteration solver. It shouldn't
+impact performance too much, but in case the type of the state space prior differs from the
+transition dynamics, there may be a mild slow down. I will patch this one out.
 =#
 
 ## PLOTS ###################################################################################
@@ -43,23 +39,33 @@ function plot_kalman_smoother(states)
     fig = Figure()
     
     for i in axes(mean_arr, 1)
-        ax = Axis(fig[1, i], title="Kalman Smoother")
-        lines!.(Ref(ax), eachslice(mean_arr[i, :, 1, :], dims=2))
+        ax = if i == 1
+            Axis(fig[i, 1], title="Kalman Smoother")
+        else
+            Axis(fig[i, 1])
+        end
+
+        lines!.(ax, eachslice(mean_arr[i, :, 1, :], dims=2))
     end
     return fig
 end
 
-# NOTE: this only works for 1 dimensional states...
-function plot_direct_iteration(chain)
-    # TODO: update the naming convention to order by var then time index
-    state_chain = group(chain, :x)
+function plot_direct_iteration(chain, dims::Int)
+    mean_arrs = mean(group(chain, :x), append_chains=false)
     
     fig = Figure()
-    ax = Axis(fig[1, 1], title="Direct Iteration")
     
-    for i in 1:size(chain, 3)
-        mean_arrs = mean(state_chain, append_chains=false)[i][:, 2]
-        lines!(ax, mean_arrs)
+    for j in 1:dims
+        ax = if j == 1
+            Axis(fig[j, 1], title = "Direct Iteration")
+        else
+            Axis(fig[j, 1])
+        end
+
+        for i in 1:size(chain, 3)
+            states = reshape(mean_arrs[i][:, 2], dims, :)
+            lines!(ax, states[j, :])
+        end
     end
     return fig
 end
@@ -94,6 +100,7 @@ end
 
 ## POSTERIOR SOLVERS #######################################################################
 
+# this might be type unstable because of the offset vector filling the type of the prior
 @model function direct_iteration(state_space, data)
     ssm ~ to_submodel(state_space, false)
     x0 ~ SSMProblems.distribution(ssm.prior)
@@ -104,12 +111,14 @@ end
     end
 end
 
+# this is guaranteed to be type stable
 @model function marginalization(state_space, data)
     ssm ~ to_submodel(state_space, false)
     _, logZ = GeneralisedFilters.filter(ssm, KF(), data)
     Turing.@addlogprob! logZ
 end
 
+# callback situation is dire, but stability is non-essential for collecting smooth states
 @model function smooth_marginalization(state_space, data)
     ssm ~ to_submodel(state_space, false)
     states, logZ = smoother(ssm, KalmanSmoother(), data)
@@ -119,26 +128,43 @@ end
 
 ## DFM EXAMPLE #############################################################################
 
-# in the original code Babur originally set R = Diagonal([0.3, 0.4, 0.5, 0.4, 0.6]) and
-# λs = [0.8, -0.3, 0.6, 1.2], where Λ = [1; λs]
+# very rudimentary, but it works for any abstract dimensional matrix
+function factor_matrix(λs::AbstractVector{T}, ny::Int, nx::Int) where {T}
+    Λ = diagm(ny, nx, ones(T, min(nx, ny)))
+    iter = 1
+    for i in 1:ny, j in 1:nx
+        if i > j
+            Λ[i, j] = λs[iter]
+            iter += 1
+        end
+    end
+    return Λ
+end
 
-@model function dynamic_factor_model(ny::Int)
+num_factors(ny::Int, nx::Int) = ny * nx - sum(1:nx)
+
+@model function dynamic_factor_model(ny::Int, nx::Int)
     # random variables defined with a ~ operator
-    λs ~ MvNormal(0.1I(ny - 1))
+    λs ~ MvNormal(0.1I(num_factors(ny, nx)))
     σ  ~ Beta()
 
-    # transition process is mean reverting random walk
-    A = [0.85;;]
-    Q = 0.4I(1)
+    # transition process is a dampened spline smoother
+    ϕ = @. (-1) ^ (1:nx) * binomial(nx, 1:nx)
+    A = diagm(-1 => ones(nx - 1))
+    A[1, :] .= -ϕ
+    A .*= 0.85
 
-    # factor loading normalized such that Λ[1] = 1 and measurement noise is iid
-    Λ = reshape([1; λs], ny, 1)
+    # unlike spline smoother add noise to identify mixed signals
+    Q = 0.4I(nx)
+
+    # factor loading normalized on the diagonals
+    Λ = factor_matrix(λs, ny, nx)
     Σ = Diagonal(σ * ones(ny))
 
     # return the homogeneous linear Gaussian state space model
     return SSMProblems.StateSpaceModel(
-        GF.HomogeneousGaussianPrior(zeros(1), lyapd(A, Q)),
-        GF.HomogeneousLinearGaussianLatentDynamics(A, zeros(1), Q),
+        GF.HomogeneousGaussianPrior(zeros(nx), lyapd(A, Q)),
+        GF.HomogeneousLinearGaussianLatentDynamics(A, zeros(nx), Q),
         GF.HomogeneousLinearGaussianObservationProcess(Λ, zeros(ny), Σ)
     )
 end
@@ -146,25 +172,25 @@ end
 ## BENCHMARKS ##############################################################################
 
 # define the baseline model (suppose we know σ)
-state_space = dynamic_factor_model(10) | (; σ = 0.2)
+state_space = dynamic_factor_model(5, 2) | (; σ = 0.2);
 
 # simulate from a provided vector of factor loadings
-true_λs = randn(9)
-true_model = state_space | (; λs = true_λs)
-_, ys = sample(true_model(), 250)
+true_λs = randn(num_factors(5, 2));
+true_model = state_space | (; λs = true_λs);
+_, ys = sample(true_model(), 250);
 
-# 947.20 seconds
+# 5106.79 seconds
 chain_1 = sample(direct_iteration(state_space, ys), NUTS(), MCMCThreads(), 500, 3);
 plot(group(chain_1, :λs), true_λs; size=(600, 1200))
 
-# 91.98 seconds
+# 183.96 seconds
 chain_2 = sample(marginalization(state_space, ys), NUTS(), MCMCThreads(), 500, 3);
 plot(group(chain_2, :λs), true_λs; size=(600, 1200))
 
 ## COMPARE STATES ##########################################################################
 
 # plot direct iteration
-plot_direct_iteration(chain_1)
+plot_direct_iteration(chain_1, 2)
 
 # plot kalman smoother
 states = returned(smooth_marginalization(state_space, ys), chain_2);
