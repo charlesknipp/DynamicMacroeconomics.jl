@@ -2,6 +2,8 @@ using LinearAlgebra, MatrixEquations, OffsetArrays
 using SSMProblems, GeneralisedFilters
 using Distributions, Random
 using Turing
+using Serialization
+using ChainsMakie, CairoMakie
 
 const GF = GeneralisedFilters
 
@@ -23,8 +25,32 @@ transition dynamics, there may be a mild slow down. I will patch this one out.
 
 ## PLOTS ###################################################################################
 
-# for plotting MCMC chains with Makie.jl instead of Plots.jl
-include("../utilities/mcmc_plots.jl");
+function plot_chains(chain, observables; legend=false)
+    # customize the theme a little bit
+    mcmc_theme = Theme(
+        ChainsDensity=(alpha=0.1, strokewidth=1.5,), TracePlot=(linewidth=1.5,)
+    )
+
+    # plot the chains using ChainsMakie.jl
+    fig = with_theme(mcmc_theme) do
+        plot(chain)
+    end
+
+    # add the true values
+    ammended_theme = (color=:tomato, linewidth=1.5, linestyle=:dash)
+    for (i, param) in enumerate(observables)
+        hlines!(fig[i, 1], param; ammended_theme...)
+        vlines!(fig[i, 2], param; ammended_theme...)
+    end
+
+    # remove the legend and trim the last row
+    if !legend
+        delete!(contents(fig[end,:])[1])
+        trim!(fig.layout)
+    end
+
+    return fig
+end
 
 get_means(vals) = hcat(getproperty.(vals, Ref(:μ))...)
 
@@ -128,7 +154,7 @@ end
 
 ## DFM EXAMPLE #############################################################################
 
-# very rudimentary, but it works for any abstract dimensional matrix
+# very rudimentary, but it works for any sized matrix
 function factor_matrix(λs::AbstractVector{T}, ny::Int, nx::Int) where {T}
     Λ = diagm(ny, nx, ones(T, min(nx, ny)))
     iter = 1
@@ -181,11 +207,13 @@ _, ys = sample(true_model(), 250);
 
 # 5106.79 seconds
 chain_1 = sample(direct_iteration(state_space, ys), NUTS(), MCMCThreads(), 500, 3);
-plot(group(chain_1, :λs), true_λs; size=(600, 1200))
+plot_chains(group(chain_1, :λs), true_λs)
+serialize("data/joint_chain.jls", chain_1)
 
 # 183.96 seconds
 chain_2 = sample(marginalization(state_space, ys), NUTS(), MCMCThreads(), 500, 3);
-plot(group(chain_2, :λs), true_λs; size=(600, 1200))
+plot_chains(group(chain_2, :λs), true_λs)
+serialize("data/marginal_chain.jls", chain_2)
 
 ## COMPARE STATES ##########################################################################
 
