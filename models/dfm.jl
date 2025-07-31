@@ -4,6 +4,7 @@ using Distributions, Random
 using Turing
 using Serialization
 using ChainsMakie, CairoMakie
+using Dates
 
 const GF = GeneralisedFilters
 
@@ -62,7 +63,7 @@ function plot_kalman_smoother(states)
 
     # nx × T × chain_length × num_chains
     mean_arr = mean(gaussian_means, dims=3)
-    fig = Figure()
+    fig = Figure(size=(600, size(mean_arr, 1) * 200))
     
     for i in axes(mean_arr, 1)
         ax = if i == 1
@@ -79,8 +80,8 @@ end
 function plot_direct_iteration(chain, dims::Int)
     mean_arrs = mean(group(chain, :x), append_chains=false)
     
-    fig = Figure()
-    
+    fig = Figure(size=(600, dims * 200))
+
     for j in 1:dims
         ax = if j == 1
             Axis(fig[j, 1], title = "Direct Iteration")
@@ -175,10 +176,11 @@ num_factors(ny::Int, nx::Int) = ny * nx - sum(1:nx)
     σ  ~ Beta()
 
     # transition process is a dampened spline smoother
-    ϕ = @. (-1) ^ (1:nx) * binomial(nx, 1:nx)
-    A = diagm(-1 => ones(nx - 1))
-    A[1, :] .= -ϕ
-    A .*= 0.85
+    # ϕ = @. (-1) ^ (1:nx) * binomial(nx, 1:nx)
+    # A = diagm(-1 => ones(nx - 1))
+    # A[1, :] .= -ϕ
+    # A .*= 0.85
+    A = 0.85I(nx)
 
     # unlike spline smoother add noise to identify mixed signals
     Q = 0.4I(nx)
@@ -198,27 +200,27 @@ end
 ## BENCHMARKS ##############################################################################
 
 # define the baseline model (suppose we know σ)
-state_space = dynamic_factor_model(5, 2) | (; σ = 0.2);
+state_space = dynamic_factor_model(5, 5) | (; σ = 0.2);
 
 # simulate from a provided vector of factor loadings
-true_λs = randn(num_factors(5, 2));
+true_λs = randn(num_factors(5, 5));
 true_model = state_space | (; λs = true_λs);
 _, ys = sample(true_model(), 250);
 
-# 5106.79 seconds
+# 23544.02 seconds
 chain_1 = sample(direct_iteration(state_space, ys), NUTS(), MCMCThreads(), 500, 3);
 plot_chains(group(chain_1, :λs), true_λs)
-serialize("data/joint_chain.jls", chain_1)
+serialize("data/joint_chain_$(Dates.today()).jls", chain_1)
 
-# 183.96 seconds
+# 125.17 seconds
 chain_2 = sample(marginalization(state_space, ys), NUTS(), MCMCThreads(), 500, 3);
 plot_chains(group(chain_2, :λs), true_λs)
-serialize("data/marginal_chain.jls", chain_2)
+serialize("data/marginal_chain_$(Dates.today()).jls", chain_2)
 
 ## COMPARE STATES ##########################################################################
 
 # plot direct iteration
-plot_direct_iteration(chain_1, 2)
+plot_direct_iteration(chain_1, 5)
 
 # plot kalman smoother
 states = returned(smooth_marginalization(state_space, ys), chain_2);
