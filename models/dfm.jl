@@ -3,8 +3,14 @@ using SSMProblems, GeneralisedFilters
 using Distributions, Random
 using Turing
 using Serialization
-using ChainsMakie, CairoMakie
 using Dates
+using Logging, LoggingExtras
+
+import AbstractMCMC, DynamicPPL
+import ProgressLogging: ProgressString, ProgressLevel
+
+# change the number of progress logger updates to send to the log file
+AbstractMCMC.DEFAULT_N_UPDATES = 30
 
 const GF = GeneralisedFilters
 
@@ -24,106 +30,37 @@ impact performance too much, but in case the type of the state space prior diffe
 transition dynamics, there may be a mild slow down. I will patch this one out.
 =#
 
-## PLOTS ###################################################################################
+## LOGGING #################################################################################
 
-function plot_chains(chain, observables; legend=false)
-    # customize the theme a little bit
-    mcmc_theme = Theme(
-        ChainsDensity=(alpha=0.1, strokewidth=1.5,), TracePlot=(linewidth=1.5,)
-    )
-
-    # plot the chains using ChainsMakie.jl
-    fig = with_theme(mcmc_theme) do
-        plot(chain)
-    end
-
-    # add the true values
-    ammended_theme = (color=:tomato, linewidth=1.5, linestyle=:dash)
-    for (i, param) in enumerate(observables)
-        hlines!(fig[i, 1], param; ammended_theme...)
-        vlines!(fig[i, 2], param; ammended_theme...)
-    end
-
-    # remove the legend and trim the last row
-    if !legend
-        delete!(contents(fig[end,:])[1])
-        trim!(fig.layout)
-    end
-
-    return fig
-end
-
-get_means(vals) = hcat(getproperty.(vals, Ref(:μ))...)
-
-function plot_kalman_smoother(states)
-    # collect only the mean from the smoother
-    gaussian_means = cat(
-        [cat(get_means.(states[:, i])..., dims=3) for i in axes(states, 2)]..., dims=4
-    )
-
-    # nx × T × chain_length × num_chains
-    mean_arr = mean(gaussian_means, dims=3)
-    fig = Figure(size=(600, size(mean_arr, 1) * 200))
-    
-    for i in axes(mean_arr, 1)
-        ax = if i == 1
-            Axis(fig[i, 1], title="Kalman Smoother")
+parse_log(message::AbstractString) = (true, message)
+function parse_log(message::ProgressString)
+    if isnothing(message.progress.fraction)
+        if message.progress.done
+            return (true, "Finished")
         else
-            Axis(fig[i, 1])
+            return (false, "")
         end
-
-        lines!.(ax, eachslice(mean_arr[i, :, 1, :], dims=2))
+    else
+        return (true, message.progress)
     end
-    return fig
 end
 
-function plot_direct_iteration(chain, dims::Int)
-    mean_arrs = mean(group(chain, :x), append_chains=false)
-    
-    fig = Figure(size=(600, dims * 200))
-
-    for j in 1:dims
-        ax = if j == 1
-            Axis(fig[j, 1], title = "Direct Iteration")
-        else
-            Axis(fig[j, 1])
-        end
-
-        for i in 1:size(chain, 3)
-            states = reshape(mean_arrs[i][:, 2], dims, :)
-            lines!(ax, states[j, :])
-        end
-    end
-    return fig
+prog_logger = FormatLogger(open("logs.txt", "w")) do io, args
+    level = (args.level == Logging.LogLevel(-1)) ? "Progress" : string(args.level)
+    out, msg = parse_log(args.message)
+    out && println(io, "[$level] $(msg)")
 end
 
-## KALMAN SMOOTHER #########################################################################
-
-# modified kalman smoother from GF that stores the entire history
-function smoother(
-    model::GF.LinearGaussianStateSpaceModel,
-    algo::KalmanSmoother,
-    observations::AbstractVector;
-    kwargs...,
+LOGGER = TeeLogger(
+    MinLevelLogger(
+        prog_logger,
+        ProgressLevel
+    ),
+    MinLevelLogger(
+        FileLogger("errors.txt"),
+        Logging.Error
+    )
 )
-    cache = GF.StateCallback(nothing, nothing)
-    filtered, logZ = GF.filter(
-        model, KF(), observations; callback=cache, kwargs...
-    )
-
-    rng = Random.default_rng()
-    back_state = filtered
-    smoothed_cache = fill(deepcopy(back_state), length(observations))
-
-    for t in (length(observations) - 1):-1:1
-        back_state = GF.backward(
-            rng, model, algo, t, back_state, observations[t]; states_cache=cache, kwargs...
-        )
-        smoothed_cache[t] = back_state
-    end
-
-    return smoothed_cache, logZ
-end
 
 ## POSTERIOR SOLVERS #######################################################################
 
@@ -175,14 +112,10 @@ num_factors(ny::Int, nx::Int) = ny * nx - sum(1:nx)
     λs ~ MvNormal(0.1I(num_factors(ny, nx)))
     σ  ~ Beta()
 
-    # transition process is a dampened spline smoother
-    # ϕ = @. (-1) ^ (1:nx) * binomial(nx, 1:nx)
-    # A = diagm(-1 => ones(nx - 1))
-    # A[1, :] .= -ϕ
-    # A .*= 0.85
+    # transition process is a dampened iid random walk
     A = 0.85I(nx)
 
-    # unlike spline smoother add noise to identify mixed signals
+    # add noise to identify mixed signals
     Q = 0.4I(nx)
 
     # factor loading normalized on the diagonals
@@ -200,28 +133,25 @@ end
 ## BENCHMARKS ##############################################################################
 
 # define the baseline model (suppose we know σ)
-state_space = dynamic_factor_model(5, 5) | (; σ = 0.2);
+state_space = dynamic_factor_model(3, 3) | (; σ = 0.2);
 
 # simulate from a provided vector of factor loadings
-true_λs = randn(num_factors(5, 5));
+rng = MersenneTwister(1234)
+true_λs = randn(rng, num_factors(3, 3));
 true_model = state_space | (; λs = true_λs);
-_, ys = sample(true_model(), 250);
+_, _, ys = sample(true_model(), 250);
 
-# 23544.02 seconds
-chain_1 = sample(direct_iteration(state_space, ys), NUTS(), MCMCThreads(), 500, 3);
-plot_chains(group(chain_1, :λs), true_λs)
-serialize("data/joint_chain_$(Dates.today()).jls", chain_1)
+function run_sampler(model::DynamicPPL.Model)
+    model_name = string(typeof(model).parameters[1])
+    dims = model.args.state_space.args
+    with_logger(LOGGER) do
+        chain = sample(model, NUTS(), MCMCThreads(), 500, 3)
+        serialize("data/$(Dates.today()) $(model_name) ($(dims.nx), $(dims.ny)).jls", chain)
+    end
+end
 
-# 125.17 seconds
-chain_2 = sample(marginalization(state_space, ys), NUTS(), MCMCThreads(), 500, 3);
-plot_chains(group(chain_2, :λs), true_λs)
-serialize("data/marginal_chain_$(Dates.today()).jls", chain_2)
+# direct iteration
+run_sampler(direct_iteration(state_space, ys))
 
-## COMPARE STATES ##########################################################################
-
-# plot direct iteration
-plot_direct_iteration(chain_1, 5)
-
-# plot kalman smoother
-states = returned(smooth_marginalization(state_space, ys), chain_2);
-plot_kalman_smoother(states)
+# marginalization
+run_sampler(marginalization(state_space, ys))
