@@ -36,7 +36,7 @@ parse_log(message::AbstractString) = (true, message)
 function parse_log(message::ProgressString)
     if isnothing(message.progress.fraction)
         if message.progress.done
-            return (true, "Finished")
+            return (true, "Finished\n")
         else
             return (false, "")
         end
@@ -51,6 +51,7 @@ prog_logger = FormatLogger(open("logs.txt", "w")) do io, args
     out && println(io, "[$level] $(msg)")
 end
 
+# this logger kinda sucks, but idk well figure it out
 LOGGER = TeeLogger(
     MinLevelLogger(
         prog_logger,
@@ -133,16 +134,16 @@ end
 ## BENCHMARKS ##############################################################################
 
 # define the baseline model (suppose we know σ)
-state_space = dynamic_factor_model(3, 3) | (; σ = 0.2);
+state_space = dynamic_factor_model(10, 10) | (; σ = 0.2);
 
 # simulate from a provided vector of factor loadings
 rng = MersenneTwister(1234)
-true_λs = randn(rng, num_factors(3, 3));
+true_λs = randn(rng, num_factors(10, 10));
 true_model = state_space | (; λs = true_λs);
 _, _, ys = sample(true_model(), 250);
 
 function run_sampler(model::DynamicPPL.Model)
-    model_name = string(typeof(model).parameters[1])
+    model_name = match(r"typeof\((\w+)\)", string(typeof(model).parameters[1]))[1]
     dims = model.args.state_space.args
     with_logger(LOGGER) do
         chain = sample(model, NUTS(), MCMCThreads(), 500, 3)
@@ -150,8 +151,19 @@ function run_sampler(model::DynamicPPL.Model)
     end
 end
 
+# marginalization
+run_sampler(marginalization(state_space, ys))
+
 # direct iteration
 run_sampler(direct_iteration(state_space, ys))
 
-# marginalization
-run_sampler(marginalization(state_space, ys))
+## DESERIALIZE CHAINS ######################################################################
+
+function read_chain(dx, model)
+    files = readdir("data")
+    most_recent = Base.filter(x -> endswith(x, "$model ($dx, $dx).jls"), files)[end]
+    return deserialize(joinpath("data", most_recent))
+end
+
+chain_1 = read_chain(10, "direct_iteration");
+chain_2 = read_chain(10, "marginalization");
