@@ -119,9 +119,9 @@ end;
     return walras
 end;
 
-@simple function shocks(Z, ρ)
-    ε = log(Z) - ρ * log(lag(Z))
-    return ε
+@simple function shocks(Z, ρ, ε)
+    shock_res = log(Z) - ρ * log(lag(Z)) - ε
+    return shock_res
 end;
 nothing # hide
 ```
@@ -139,8 +139,8 @@ With the steady state calculation defined, we have enough to materialize the RBC
 ```@example rbc
 rbc_model = solve(
     model(households, firms, shocks),
-    (C=1.0, K=1.0, Z=1.0),
-    (γ=1.00, α=0.30, δ=0.25, β=(1/1.05), ρ=0.80)
+    (C=1.00, K=1.00, Z=1.00),
+    (γ=1.00, α=0.30, δ=0.25, β=(1/1.05), ρ=0.80, ε=0.00)
 );
 nothing # hide
 ```
@@ -204,6 +204,6 @@ This yields matrices $P$ and $Q$ which defines the state transition for a first 
 
 Using `DynamicMacroeconomics`, we can obtain these matrices and construct a `SSMProblems` compatible state space (as a vector autoregression) like so:
 ```@example rbc
-P, Q = solve(rbc_model, [:K, :C, :Z], [:ε], 1; algo=QuadraticIteration())
+P, Q = solve(rbc_model, [:K, :C, :Z], [:ε]; order=1, algo=QuadraticIteration())
 VAR  = LinearGaussianControllableDynamics(P, Q)
 ```
