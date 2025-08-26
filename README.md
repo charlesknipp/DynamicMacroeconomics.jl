@@ -35,9 +35,9 @@ end
     return walras
 end
 
-@simple function shocks(Z, ρ)
-    ε = log(Z) - ρ * log(lag(Z))
-    return ε
+@simple function shocks(Z, ρ, ε)
+    shock_res = log(Z) - ρ * log(lag(Z)) - ε
+    return shock_res
 end
 ```
 
@@ -46,22 +46,22 @@ Steady states are calculated internally, using `NonlinearSolve.jl` as a backend 
 ```julia
 rbc_model = solve(
     model(households, firms, shocks),
-    (C=1.0, K=1.0, Z=1.0),
-    (γ=1.00, α=0.30, δ=0.25, β=(1/1.05), ρ=0.80)
+    (C=1.00, K=1.00, Z=1.00),
+    (γ=1.00, α=0.30, δ=0.25, β=(1/1.05), ρ=0.80, ε=0.00)
 )
 ```
 
-Now that the model is sufficiently defined, we can obtain the policy function by solving the first order perturbation either by QZ decomposition (work in progress) or quadratic iteration.
+Now that the model is sufficiently defined, we can obtain the policy function by solving the first order perturbation either by state space or sequence space methods.
 
 ```julia
-A1, B1 = solve(rbc_model, [:K, :C, :Z], [:ε], 1; algo=QZ()) # broken
-A2, B2 = solve(rbc_model, [:K, :C, :Z], [:ε], 1; algo=QuadraticIteration())
+A, B = solve(rbc_model, [:K, :C, :Z], [:ε]; order=1, algo=QuadraticIteration())
+GE   = solve(rbc_model, [:K, :C, :Z], [:ε]; order=1, algo=SequenceJacobian(150))
 ```
 
 We encourage the user to experiment with `SSMProblems.jl` to create a potentially nonlinear measurement, but we include a constructor for linear Gaussian state space models. To demonstrate we can create a state space observing consumption with a measurement noise of 1.0, and simulate 100 time periods.
 
 ```julia
-ssm = StateSpaceModel(..., LinearGaussianControllableDynamics(A2, B2), ...)
+ssm = StateSpaceModel(..., LinearGaussianControllableDynamics(A, B), ...)
 x, y = sample(rng, ssm, 100)
 ```
 
@@ -70,7 +70,6 @@ Using `GeneralizedFilters.jl`, we can extract the loglikelihood with the Kalman 
 ## FAQ
 
 - Models only support one lead and one lag as of now.
-- I plan on adding the numerical calculation of steady states, but it is absent for now.
 - QZ does not work for most models, since it was made prior to the macro which records timings.
 
 Just ask me for questions on the implementation, and if you see anything questionable feel free to raise an issue or a PR.
