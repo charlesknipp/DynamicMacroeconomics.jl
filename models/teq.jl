@@ -1,22 +1,26 @@
 using DynamicMacroeconomics
 
-@block function euler(y, πs, i, ωs)
-    y[t] = y[t+1] - (1 / γ) * (i[t] - πs[t-1]) + ωs[t]
-end;
+@simple function euler_equation(y, πs, i, ωs, γ)
+    euler_res = y - lead(y) + (1 / γ) * (i - lag(πs)) - ωs
+    return euler_res
+end
 
-@block function nkpc(y, πs, ωd)
-    πs[t] = β * πs[t+1] + (1 - θ) * (1 - θ * β) / θ * (γ + φ) * y[t] - ωd[t]
-end;
+@simple function phillips_curve(y, πs, ωd, θ, β, φ, γ)
+    nkpc_res = πs - (β * lead(πs) + (1 - θ) * (1 - θ * β) / θ * (γ + φ) * y - ωd)
+    return nkpc_res
+end
 
-@block function taylor(y, πs, i, ωm)
-    i[t] = ϕi * i[t-1] + (1 - ϕi) * (ϕπ * πs[t] + ϕy * y[t]) + ωm[t]
-end;
+@simple function taylor(y, πs, i, ωm, ϕi, ϕπ, ϕy)
+    taylor_res = i - ϕi * lag(i) - (1 - ϕi) * (ϕπ * πs + ϕy * y) - ωm
+    return taylor_res
+end
 
-@block function ar_shocks(ωs, ωd, ωm, εs, εd, εm)
-    ωs[t] = ρs * ωs[t-1] + σs * εs[t]
-    ωd[t] = ρd * ωd[t-1] + σd * εd[t]
-    ωm[t] = ρm * ωm[t-1] + σm * εm[t]
-end;
+@simple function ar_shocks(ωs, ωd, ωm, εs, εd, εm, ρs, ρd, ρm)
+    sres = ωs - ρs * lag(ωs) - εs
+    dres = ωd - ρd * lag(ωd) - εd
+    mres = ωm - ρm * lag(ωm) - εm
+    return sres, dres, mres
+end
 
 ## DEMO ####################################################################################
 
@@ -31,12 +35,13 @@ end;
 );
 
 # start with one time shocks
-analytical_steady_state_1(θ) = (y=0, πs=0, i=0);
-teq_model_1 = RationalExpectationsModel(
-    [euler, nkpc, taylor], [:ωs, :ωd, :ωm], analytical_steady_state_1
-);
+teq_model_1 = solve(
+    model(euler_equation, phillips_curve, taylor),
+    (y=0, πs=0, i=0), (θ1..., ωm=0, ωs=0, ωd=0)
+)
 
-policy_1 = solve(teq_model_1, θ1, 1; algo=QuadraticIteration());
+sys = FirstOrderSystem(teq_model_1, [:y, :πs, :i], [:ωs, :ωd, :ωm])
+sys.∂Z
 
 θ2 = (;
     θ1...,
@@ -49,9 +54,10 @@ policy_1 = solve(teq_model_1, θ1, 1; algo=QuadraticIteration());
 );
 
 # add AR(1) shocks
-analytical_steady_state_2(θ) = (y=0, πs=0, i=0, ωs=0, ωd=0, ωm=0);
-teq_model_2 = RationalExpectationsModel(
-    [euler, nkpc, taylor, ar_shocks], [:εs, :εd, :εm], analytical_steady_state_2
-);
+teq_model_2 = solve(
+    model(euler_equation, phillips_curve, taylor, ar_shocks),
+    (y=0, πs=0, i=0, ωs=0, ωd=0, ωm=0), (θ2..., εs=0, εd=0, εm=0)
+)
 
-policy_2 = solve(teq_model_2, θ2, 1; algo=QuadraticIteration());
+sys = FirstOrderSystem(teq_model_2, [:y, :πs, :i, :ωs, :ωd, :ωm], [:εs, :εd, :εm])
+sys.∂Z

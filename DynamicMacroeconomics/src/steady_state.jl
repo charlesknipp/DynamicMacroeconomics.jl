@@ -36,7 +36,8 @@ function solve(
     model::GraphicalModel,
     initial_guess::NamedTuple{names},
     calibration;
-    algorithm = NewtonRaphson(; autodiff=AutoForwardDiff())
+    algorithm = NewtonRaphson(; autodiff=AutoForwardDiff()),
+    kwargs...
 ) where {names}
     # define the problem akin to the SciML ecosystem
     problem = NonlinearProblem(
@@ -46,7 +47,7 @@ function solve(
     )
 
     # solve with a simple Newton Ralphson algorithm
-    solution = NonlinearSolve.solve(problem, algorithm)
+    solution = NonlinearSolve.solve(problem, algorithm; kwargs...)
     if SciMLBase.successful_retcode(solution)
         ss = steady_state(model, NamedTuple{names}(solution.u), calibration)
         return SteadyStateModel(model, ss[setdiff(keys(ss), model.targets)])

@@ -7,6 +7,7 @@ using GeneralisedFilters
 using SSMProblems
 using MatrixEquations
 using LinearAlgebra
+using ToeplitzMatrices
 
 using DifferentiationInterface
 import ForwardDiff
@@ -178,8 +179,9 @@ function model(blocks...)
 end
 
 include("steady_state.jl")
+include("systems.jl")
 include("misc.jl")
+include("solutions.jl")
 include("state_space.jl")
-include("perturbation_solutions.jl")
 
 end # module DynamicMacroeconomics
