@@ -3,18 +3,18 @@ export solve, QuadraticIteration, SequenceJacobian
 using DifferentiationInterface: jacobian
 
 """
-    solve(model, parameters, order; kwargs...)
+    solve(model, steady_state, states, shocks, order; kwargs...)
 
 For a given rational expectations model, solve the k-th order approximation to obtain the
 policy function for Markov representation.
 
 See also [`state_space`](@ref)..
 """
-function solve(model::SteadyStateModel, states, shocks, order::Int=1; kwargs...)
-    return solve(model, states, shocks, Val(order); kwargs...)
+function solve(block::AbstractBlock, ss, states, shocks, order::Int=1; kwargs...)
+    return solve(block, ss, states, shocks, Val(order); kwargs...)
 end
 
-function solve(model::SteadyStateModel, states, shocks, order; kwargs...)
+function solve(block::AbstractBlock, ss, states, shocks, order; kwargs...)
     return error("only first order perturbation methods are defined")
 end
 
@@ -59,9 +59,9 @@ function solve(system::FirstOrderSystem, algo::QuadraticIteration)
 end
 
 function solve(
-    model::SteadyStateModel, states, shocks, ::Val{1}; algo=QuadraticIteration(), kwargs...
+    model::AbstractBlock, ss, states, shocks, ::Val{1}; algo=QuadraticIteration(), kwargs...
 )
-    system = FirstOrderSystem(model, states, shocks)
+    system = FirstOrderSystem(model, ss, states, shocks)
     return solve(system, algo)
 end
 
