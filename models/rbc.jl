@@ -16,11 +16,13 @@ end
     return shock_res
 end
 
-# make an RBC model and solve it's steady state
-rbc_model = solve(
-    model(households, firms, shocks),
-    (C=1.0, K=1.0, Z=1.0),
-    (γ=1.00, α=0.30, δ=0.25, β=(1/1.05), ρ=0.80, ε=0.00)
+# make an RBC model and solve its steady state
+rbc_model = model(households, firms, shocks, name="rbc")
+ss = solve(
+    rbc_model,
+    (γ=1.00, α=0.30, δ=0.25, β=(1/1.05), ρ=0.80, ε=0.00),
+    (C=1.00, K=0.40, Z=0.40),
+    (euler=0.00, walras=0.00, shock_res=0.00)
 )
 
 # solve the first order perturbation to get the implied VAR (broken)

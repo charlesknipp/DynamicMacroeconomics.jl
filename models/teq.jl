@@ -35,12 +35,15 @@ end
 );
 
 # start with one time shocks
-teq_model_1 = solve(
-    model(euler_equation, phillips_curve, taylor),
-    (y=0, πs=0, i=0), (θ1..., ωm=0, ωs=0, ωd=0)
-)
+teq_model_1 = model(euler_equation, phillips_curve, taylor, name="teq-1")
+ss1 = solve(
+    teq_model_1,
+    (θ1..., ωm=0, ωs=0, ωd=0),
+    (y=0, πs=0, i=0),
+    (euler_res=0, nkpc_res=0, taylor_res=0)
+);
 
-sys = FirstOrderSystem(teq_model_1, [:y, :πs, :i], [:ωs, :ωd, :ωm])
+sys = FirstOrderSystem(teq_model_1, ss1, [:y, :πs, :i], [:ωs, :ωd, :ωm])
 sys.∂Z
 
 θ2 = (;
@@ -54,10 +57,13 @@ sys.∂Z
 );
 
 # add AR(1) shocks
-teq_model_2 = solve(
-    model(euler_equation, phillips_curve, taylor, ar_shocks),
-    (y=0, πs=0, i=0, ωs=0, ωd=0, ωm=0), (θ2..., εs=0, εd=0, εm=0)
-)
+teq_model_2 = model(euler_equation, phillips_curve, taylor, ar_shocks)
+ss2 = solve(
+    teq_model_2,
+    (θ2..., εs=0, εd=0, εm=0),
+    (y=0, πs=0, i=0, ωs=0, ωd=0, ωm=0),
+    (euler_res=0, nkpc_res=0, taylor_res=0, sres=0, dres=0, mres=0)
+);
 
 sys = FirstOrderSystem(teq_model_2, [:y, :πs, :i, :ωs, :ωd, :ωm], [:εs, :εd, :εm])
 sys.∂Z
