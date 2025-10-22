@@ -12,12 +12,11 @@ struct FirstOrderSystem{T,ZT<:AbstractArray{T,3},UT<:AbstractArray{T,3}}
 end
 
 function FirstOrderSystem(
-    model::SteadyStateModel{N}, state_variables, shock_variables
-) where {N}
-    base_model, steady_state = model.base_model, model.steady_state
-    partials = merge([get_partials(base_model[i], steady_state) for i in 1:N]...)
+    block::AbstractBlock, steady_state, state_variables, shock_variables, targets
+)
+    partials = get_partials(block, steady_state)
     system, shocks = [], []
-    for target in base_model.targets
+    for target in targets
         ∂Zi = get.(Ref(partials[target]), state_variables, Ref(zeros(Bool, 3)))
         ∂Ui = get.(Ref(partials[target]), shock_variables, Ref(zeros(Bool, 3)))
         push!(system, cat(∂Zi..., dims=2))

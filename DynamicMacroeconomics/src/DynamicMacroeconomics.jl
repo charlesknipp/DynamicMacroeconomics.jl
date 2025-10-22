@@ -34,27 +34,24 @@ contemp(x::AbstractVector{<:Real}) = x[2]
 
 abstract type AbstractBlock end
 
-# only simple blocks are currently defined
-struct SimpleBlock{FT,NU,NO,MT} <: AbstractBlock
+function Base.show(io::IO, b::AbstractBlock)
+    inputs  = join(b.inputs, ", ")
+    outputs = join(b.outputs, ", ")
+    print(io, "$(b.name): ($inputs) → ($outputs)")
+end
+
+function inputs(::AbstractBlock) end
+function outputs(::AbstractBlock) end
+
+struct SimpleBlock{FT,NU,NO} <: AbstractBlock
     functor::FT
     inputs::NTuple{NU,Symbol}
     outputs::NTuple{NO,Symbol}
-    metadata::MT
+    name::String
 end
 
 inputs(block::SimpleBlock) = block.inputs
 outputs(block::SimpleBlock) = block.outputs
-
-function show_variables(vars::NTuple{N,Symbol}) where {N}
-    join(vars, ", ")
-end
-
-function Base.show(io::IO, b::SimpleBlock)
-    block_name = split(string(typeof(b.functor).name.name), "#"; keepempty=false)[2]
-    inputs = show_variables(b.inputs)
-    outputs = show_variables(b.outputs)
-    print(io, "$block_name: ($inputs) → ($outputs)")
-end
 
 macro simple(args...)
     # split the function definition
@@ -69,13 +66,12 @@ macro simple(args...)
     func_def[:name] = functor
     outputs = build_expression!(func_def)
 
-    # grab the offsets and store that in metadata
-    metadata = setdiff(func_def[:args], inputs)
-
     # return the quoted expression
     return MacroTools.@q begin
         $(MacroTools.combinedef(func_def))
-        $(esc(block_name)) = $(SimpleBlock)($(functor), $(inputs), $(outputs), $(metadata))
+        $(esc(block_name)) = $(SimpleBlock)(
+            $(functor), $(inputs), $(outputs), $(string(block_name))
+        )
     end
 end
 
@@ -117,65 +113,72 @@ function build_expression!(func_dict)
 end
 
 # makes blocks callable
-function (block::SimpleBlock)(x...)
+function (block::SimpleBlock)(x)
     out = block.functor(x...)
     return NamedTuple{outputs(block)}(out)
 end
 
-# TODO: this needs some work...
+# TODO: still needs work, but is at least type stable
 function get_partials(block::SimpleBlock, ss::NamedTuple, backend=AutoForwardDiff())
     invars = inputs(block)
     ssvars = [ss[invars]...]
     stacked_ss = repeat(ssvars, 1, 3)
 
-    ∂s = Dict()
-    for out in outputs(block)
+    # not too happy about this component
+    ∂s = map(outputs(block)) do out
         ∇x = DifferentiationInterface.gradient(
-            x -> block(collect(eachrow(x))...)[out], backend, stacked_ss
+            x -> block(eachrow(x))[out], backend, stacked_ss
         )
 
-        ∂s[out] = Dict(zip(invars, eachrow(∇x)))
+        Dict(zip(invars, eachrow(∇x)))
     end
-    return ∂s
+    return Dict(zip(outputs(block), ∂s))
 end
 
-struct GraphicalModel{N,NU,NT}
+struct CombinedBlock{BS<:Tuple,NU,NO} <: AbstractBlock
     dag::SimpleDiGraph
-    blocks::NTuple{N,AbstractBlock}
-    order::Vector{Int64}
-
-    unknowns::NTuple{NU,Symbol}
-    targets::NTuple{NT,Symbol}
+    blocks::BS
+    inputs::NTuple{NU,Symbol}
+    outputs::NTuple{NO,Symbol}
+    name::String
 end
 
-# TODO: improve pretty printing
-function Base.show(io::IO, model::GraphicalModel)
-    println(io, join(model.blocks, "\n"))
+Base.length(model::CombinedBlock) = length(model.blocks)
+Base.@propagate_inbounds Base.getindex(model::CombinedBlock, i) = model.blocks[i]
+
+Base.iterate(model::CombinedBlock) = iterate(model.blocks)
+Base.iterate(model::CombinedBlock, state) = iterate(model.blocks, state)
+
+function (blocks::CombinedBlock)(x)
+    out = (;)
+    for block in blocks
+        invars = inputs(block)
+        out = merge(out, block(x[invars]))
+        x = merge(x, out)
+    end
+    return NamedTuple{outputs(blocks)}(out)
 end
 
-Base.length(::GraphicalModel{N}) where {N} = N
-
-Base.@propagate_inbounds Base.getindex(model::GraphicalModel, i) = model.blocks[model.order[i]]
+inputs(block::CombinedBlock) = block.inputs
+outputs(block::CombinedBlock) = block.outputs
 
 # take blocks and construct a digraph
-function model(blocks...)
-    pool = collect(blocks)
-    graph = SimpleDiGraph(length(pool))
-    for (n, block) in enumerate(pool)
+function model(blocks...; name::String="block")
+    dag = SimpleDiGraph(length(blocks))
+    for (n, block) in enumerate(blocks)
         for output in outputs(block)
-            m = findall(x -> in(output, x), inputs.(pool))
-            add_edge!.(Ref(graph), n, m)
+            m = findall(x -> in(output, x), inputs.(blocks))
+            add_edge!.(Ref(dag), n, m)
         end
     end
-    order = topological_sort(graph)
 
-    invars = union((inputs(pool[i]) for i in order)...)
-    outvars = union((outputs(pool[i]) for i in order)...)
+    blocks = blocks[topological_sort(dag)]
+    invars, outvars = union(inputs.(blocks)...), union(outputs.(blocks)...)
+    return CombinedBlock(dag, blocks, tuple(setdiff(invars, outvars)...), tuple(outvars...), name)
+end
 
-    unknowns = tuple(setdiff(invars, outvars)...)
-    targets = tuple(setdiff(outvars, invars)...)
-
-    return GraphicalModel(graph, blocks, order, unknowns, targets)
+function get_partials(::CombinedBlock, ::NamedTuple, backend)
+    throw("not yet implemented")
 end
 
 include("steady_state.jl")

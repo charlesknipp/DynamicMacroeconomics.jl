@@ -40,7 +40,7 @@ is set by default to order = 1.
 See also [`solve`](@ref)..
 """
 function state_space(
-    model::GraphicalModel,
+    model::AbstractBlock,
     parameters,
     observations,
     order::Int = 1;
@@ -51,14 +51,14 @@ function state_space(
 end
 
 function state_space(
-    model::GraphicalModel, parameters, observations, order, noise; kwargs...
+    model::AbstractBlock, parameters, observations, order, noise; kwargs...
 )
     error("higher order state space models not yet supported")
 end
 
 # # TODO: define a rrule for `lyapd` to use analytical covariance
 # function state_space(
-#     model::GraphicalModel, parameters, observations, ::Val{1}, noise; kwargs...
+#     model::AbstractBlock, parameters, observations, ::Val{1}, noise; kwargs...
 # )
 #     nx, ny = length(model.states), length(observations)
 #     A, B = solve(model, parameters, 1; kwargs...)

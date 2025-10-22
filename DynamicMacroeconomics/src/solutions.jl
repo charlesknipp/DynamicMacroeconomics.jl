@@ -55,7 +55,7 @@ function solve(system::FirstOrderSystem, algo::QuadraticIteration)
         end
     end
 
-    return ghx, (A * ghx + B) \ -system.∂U
+    return ghx, (A * ghx + B) \ -system.∂U[:, :, 2]
 end
 
 function solve(
