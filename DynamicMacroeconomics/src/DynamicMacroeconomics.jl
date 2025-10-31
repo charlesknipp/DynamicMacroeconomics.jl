@@ -9,28 +9,31 @@ using MatrixEquations
 using LinearAlgebra
 using ToeplitzMatrices
 
+using SparseArrays
+using SparseConnectivityTracer
+using SparseMatrixColorings
+
 using DifferentiationInterface
 import ForwardDiff
+using ADTypes
 
 using NonlinearSolve
 
 using Reexport
 using MacroTools
 using Graphs
+using ComponentArrays
 
 @reexport using SSMProblems, GeneralisedFilters
 
-export model, @simple, lead, lag
+export model, @simple, lead, lag, jacobian
+export SimpleBlock, CombinedBlock
 
 # for steady state evaluations
-lead(x::Real) = x
-lag(x::Real) = x
-contemp(x::Real) = x
+offset(x::Real, ::Int) = x
 
-# for partial derivatives
-lead(x::AbstractVector{<:Real}) = x[3]
-lag(x::AbstractVector{<:Real}) = x[1]
-contemp(x::AbstractVector{<:Real}) = x[2]
+# for the time being just assume size(x) = (3)
+offset(x::AbstractVector, t::Int) = x[2+t]
 
 abstract type AbstractBlock end
 
@@ -43,21 +46,19 @@ end
 function inputs(::AbstractBlock) end
 function outputs(::AbstractBlock) end
 
-struct SimpleBlock{FT,NU,NO} <: AbstractBlock
+struct SimpleBlock{FT,NU,NO,SP} <: AbstractBlock
     functor::FT
     inputs::NTuple{NU,Symbol}
     outputs::NTuple{NO,Symbol}
     name::String
+    sparsity::SP
 end
 
 inputs(block::SimpleBlock) = block.inputs
 outputs(block::SimpleBlock) = block.outputs
 
 macro simple(args...)
-    # split the function definition
     func_def = MacroTools.splitdef(args[end])
-
-    # extract the name to define the block
     block_name = func_def[:name]
     inputs = tuple(func_def[:args]...)
 
@@ -66,74 +67,97 @@ macro simple(args...)
     func_def[:name] = functor
     outputs = build_expression!(func_def)
 
-    # return the quoted expression
+    # store the block sparsity for efficient evaluation of the Jacobian
+    sparse_io = sparsity_pattern(func_def[:body], inputs, outputs)
     return MacroTools.@q begin
         $(MacroTools.combinedef(func_def))
         $(esc(block_name)) = $(SimpleBlock)(
-            $(functor), $(inputs), $(outputs), $(string(block_name))
+            $(functor), $(inputs), $(outputs), $(string(block_name)), $(sparse_io)
         )
     end
 end
 
 function build_expression!(func_dict)
-    # capture the targets in the return statement
     targets = Symbol[]
-    MacroTools.postwalk(func_dict[:body]) do ex
+    func_dict[:body] = MacroTools.postwalk(func_dict[:body]) do ex
         if @capture(ex, return target_)
             if target isa Expr
                 push!(targets, target.args...)
+                return ex
             else
+                # return singular targets as a tuple
                 push!(targets, target)
+                return :(return ($target, ))
             end
         else
             return ex
         end
     end
 
-    # encase time series with comtemp()
-    new_ex = MacroTools.postwalk(func_dict[:body]) do ex
+    func_dict[:body] = MacroTools.postwalk(func_dict[:body]) do ex
         if ex isa Symbol && ex in func_dict[:args]
-            return :(contemp($ex))
+            return :(offset($ex, 0))
         else
             return ex
         end
     end
 
-    # undo extraneous contemp calls for lags/leads
-    fixed_ex = MacroTools.postwalk(new_ex) do ex
-        if @capture(ex, f_(contemp(var_))) && f in [:lead, :lag]
-            return :($f($var))
+    func_dict[:body] = MacroTools.postwalk(func_dict[:body]) do ex
+        if @capture(ex, f_(offset(var_, 0)))
+            f == :lead && return :(offset($var, 1))
+            f == :lag && return :(offset($var, -1))
         else
             return ex
         end
     end
 
-    func_dict[:body] = fixed_ex
     return tuple(targets...)
 end
 
-# makes blocks callable
-function (block::SimpleBlock)(x)
-    out = block.functor(x...)
-    return NamedTuple{outputs(block)}(out)
-end
+named_tuple(x::NTuple{N,Symbol}) where {N} = NamedTuple{x}(keys(x))
 
-# TODO: still needs work, but is at least type stable
-function get_partials(block::SimpleBlock, ss::NamedTuple, backend=AutoForwardDiff())
-    invars = inputs(block)
-    ssvars = [ss[invars]...]
-    stacked_ss = repeat(ssvars, 1, 3)
+function sparsity_detector(body, inputs, outputs)
+    sparsity = spzeros(Bool, length(outputs), length(inputs)*3)
+    colmap = named_tuple(inputs)
+    rowmap = named_tuple(outputs)
 
-    # not too happy about this component
-    ∂s = map(outputs(block)) do out
-        ∇x = DifferentiationInterface.gradient(
-            x -> block(eachrow(x))[out], backend, stacked_ss
-        )
-
-        Dict(zip(invars, eachrow(∇x)))
+    # make all recursive substitutions
+    exprmap = Dict{Symbol,Expr}()
+    MacroTools.postwalk(body) do ex
+        if @capture(ex, LHS_ = RHS_)
+            exprmap[LHS] = RHS
+        elseif (ex in keys(exprmap))
+            return exprmap[ex]
+        end
+        return ex
     end
-    return Dict(zip(outputs(block), ∂s))
+
+    # set an indicator for the the time offsets
+    for out in outputs
+        MacroTools.postwalk(exprmap[out]) do ex
+            if @capture(ex, offset(x_, t_))
+                i, j = rowmap[out], colmap[x]
+                sparsity[i, 3*(j-1) + (t+2)] = 1
+            end
+            return ex
+        end
+    end
+
+    return KnownJacobianSparsityDetector(sparsity)
 end
+
+function (block::SimpleBlock)(x::NamedTuple)
+    return NamedTuple{block.outputs}(block.functor(x[block.inputs]...))
+end
+
+function (block::SimpleBlock)(x::ComponentArray)
+    return ComponentVector(
+        collect(block.functor(getproperty.(Ref(x), block.inputs)...)), Axis(block.outputs)
+    )
+end
+
+# when taking partials given a constant (not type stable)
+(block::SimpleBlock)(x::ComponentArray, c::ComponentArray) = block([x; c])
 
 struct CombinedBlock{BS<:Tuple,NU,NO} <: AbstractBlock
     dag::SimpleDiGraph
@@ -149,15 +173,26 @@ Base.@propagate_inbounds Base.getindex(model::CombinedBlock, i) = model.blocks[i
 Base.iterate(model::CombinedBlock) = iterate(model.blocks)
 Base.iterate(model::CombinedBlock, state) = iterate(model.blocks, state)
 
-function (blocks::CombinedBlock)(x)
-    out = (;)
+function combined!(blocks::CombinedBlock, out, x)
     for block in blocks
-        invars = inputs(block)
-        out = merge(out, block(x[invars]))
+        out = merge(out, block(x))
         x = merge(x, out)
     end
-    return NamedTuple{outputs(blocks)}(out)
+    return out
 end
+
+function (blocks::CombinedBlock)(x::NamedTuple)
+    out = (;)
+    return NamedTuple{outputs(blocks)}(combined!(block, out, x))
+end
+
+function (blocks::CombinedBlock)(x::ComponentVector{T}) where {T}
+    out = ComponentVector{T}()
+    return combined!(blocks, out, x)
+end
+
+# TODO: this is untested!
+(block::CombinedBlock)(x::ComponentVector, c::ComponentVector) = block(block, [x; c])
 
 inputs(block::CombinedBlock) = block.inputs
 outputs(block::CombinedBlock) = block.outputs
@@ -177,10 +212,17 @@ function model(blocks...; name::String="block")
     return CombinedBlock(dag, blocks, tuple(setdiff(invars, outvars)...), tuple(outvars...), name)
 end
 
-function get_partials(::CombinedBlock, ::NamedTuple, backend)
-    throw("not yet implemented")
-end
+# function get_unknowns(model::CombinedBlock)
+#     invars, outvars = inputs(model), outputs(model)
+#     return tuple(setdiff(invars, outvars)...)
+# end
 
+# function get_targets(model::CombinedBlock)
+#     invars, outvars = inputs(model), outputs(model)
+#     return tuple(setdiff(outvars, invars)...)
+# end
+
+include("jacobians.jl")
 include("steady_state.jl")
 include("systems.jl")
 include("misc.jl")

@@ -41,10 +41,7 @@ ss1 = solve(
     (θ1..., ωm=0, ωs=0, ωd=0),
     (y=0, πs=0, i=0),
     (euler_res=0, nkpc_res=0, taylor_res=0)
-);
-
-sys = FirstOrderSystem(teq_model_1, ss1, [:y, :πs, :i], [:ωs, :ωd, :ωm])
-sys.∂Z
+)
 
 θ2 = (;
     θ1...,
@@ -63,7 +60,4 @@ ss2 = solve(
     (θ2..., εs=0, εd=0, εm=0),
     (y=0, πs=0, i=0, ωs=0, ωd=0, ωm=0),
     (euler_res=0, nkpc_res=0, taylor_res=0, sres=0, dres=0, mres=0)
-);
-
-sys = FirstOrderSystem(teq_model_2, [:y, :πs, :i, :ωs, :ωd, :ωm], [:εs, :εd, :εm])
-sys.∂Z
+)

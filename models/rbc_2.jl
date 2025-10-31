@@ -28,3 +28,10 @@ ss = solve(
     (φ=0.90, β=0.99, K=2.00, Z=1.00),
     (goods_mkt=0.00, r=0.01, euler=0.00, Y=1.00)
 )
+
+## JACOBIAN DICTS ##########################################################################
+
+# jacobians of simple blocks are sparse by default
+𝒥1 = jacobian(firms, ss, (:K, :L, :Z))
+𝒥2 = jacobian(households, ss, (:K, :L, :w))
+𝒥3 = jacobian(market_clearing, ss, (:C, :I, :K, :L, :Y, :r, :w))

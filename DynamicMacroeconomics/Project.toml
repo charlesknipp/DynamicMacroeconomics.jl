@@ -4,6 +4,8 @@ authors = ["Charles Knipp <charles.a.knipp@frb.gov>"]
 version = "0.1.0"
 
 [deps]
+ADTypes = "47edcb42-4c32-4615-8424-f2b9edc5f35b"
+ComponentArrays = "b0b7db55-cfe3-40fc-9ded-d10e2dbeff66"
 DifferentiationInterface = "a0c0ee7d-e4b9-4e03-894e-1c5f64a51d63"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 ForwardDiff = "f6369f11-7733-5829-9624-2563aa707210"
@@ -16,12 +18,17 @@ NonlinearSolve = "8913a72c-1f9b-4ce2-8d82-65094dcecaec"
 Random = "9a3f8284-a2c9-5f02-9a11-845980a1fd5c"
 Reexport = "189a3867-3050-52da-a836-e630ba90ab69"
 SSMProblems = "26aad666-b158-4e64-9d35-0e672562fa48"
+SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
+SparseConnectivityTracer = "9f842d2f-2579-4b1d-911e-f412cf18a3f5"
+SparseMatrixColorings = "0a514795-09f3-496d-8182-132a7b665d35"
 ToeplitzMatrices = "c751599d-da0a-543b-9d20-d0a503d91d24"
 
 [compat]
+ComponentArrays = "0.15.29"
 DifferentiationInterface = "0.7.1"
 ForwardDiff = "1.0.1"
 Graphs = "1.13.0"
 MacroTools = "0.5.16"
 NonlinearSolve = "4.10.0"
+SparseArrays = "1.11.0"
 ToeplitzMatrices = "0.8.5"
