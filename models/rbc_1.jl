@@ -1,13 +1,20 @@
 using DynamicMacroeconomics
 
-@simple function households(C, K, Z, α, β, γ, δ)
-    euler = (C ^ -γ) - (β * (α * lead(Z) * K ^ (α - 1) + 1 - δ) * (lead(C) ^ -γ))
-    return euler
+@simple function market_clearing(C, Y, I, r, β, γ)
+    euler = (C ^ -γ) - (β * (1 + lead(r)) * (lead(C) ^ -γ))
+    goods_mkt = Y - C - I
+    return euler, goods_mkt
 end
 
-@simple function firms(Z, K, C, α, δ)
-    walras = (Z * lag(K) ^ α - C) + (1 - δ) * lag(K) - K
-    return walras
+@simple function firms(Z, K, α, δ)
+    r = α * Z * lag(K) ^ (α - 1) - δ
+    Y = Z * lag(K) ^ α
+    return r, Y
+end
+
+@simple function households(K, δ)
+    I = K - (1 - δ) * lag(K)
+    return I
 end
 
 @simple function shocks(Z, ρ, ε)
@@ -15,18 +22,17 @@ end
     return shock_res
 end
 
-# make an RBC model and solve its steady state
-rbc_model = model(households, firms, shocks, name="rbc")
+# make a traditional RBC model and solve its steady state
+rbc_model = model(market_clearing, firms, households, shocks, name="rbc")
 ss = solve(
     rbc_model,
     (γ=1.00, α=0.30, δ=0.25, β=(1/1.05), ρ=0.80, ε=0.00),
     (C=1.00, K=0.40, Z=0.40),
-    (euler=0.00, walras=0.00, shock_res=0.00)
+    (euler=0.00, goods_mkt=0.00, shock_res=0.00)
 )
 
-## JACOBIAN DICTS ##########################################################################
+# the first order jacobian can be found like so
+𝒥 = jacobian(rbc_model, ss, (:C, :K, :Z, :ε), (:euler, :goods_mkt, :shock_res))
 
-# jacobians of simple blocks are sparse by default
-𝒥1 = jacobian(households, ss, (:C, :K, :Z))
-𝒥2 = jacobian(firms, ss, (:C, :K, :Z))
-𝒥3 = jacobian(shocks, ss, (:Z, ))
+# and subsequently placed into a first order system with the exogenous shock set to ε
+sys = FirstOrderSystem(𝒥, (:ε, ))

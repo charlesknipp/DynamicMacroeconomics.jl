@@ -3,7 +3,6 @@ module DynamicMacroeconomics
 using Distributions
 using Random
 
-using GeneralisedFilters
 using SSMProblems
 using MatrixEquations
 using LinearAlgebra
@@ -23,17 +22,20 @@ using Reexport
 using MacroTools
 using Graphs
 using ComponentArrays
+using OffsetArrays
 
-@reexport using SSMProblems, GeneralisedFilters
+using OffsetArrays: centered
+using ADTypes: KnownJacobianSparsityDetector
 
 export model, @simple, lead, lag, jacobian
 export SimpleBlock, CombinedBlock
+export inputs, outputs
 
 # for steady state evaluations
 offset(x::Real, ::Int) = x
 
 # for the time being just assume size(x) = (3)
-offset(x::AbstractVector, t::Int) = x[2+t]
+offset(x::AbstractVector, t::Int) = x[2 + t]
 
 abstract type AbstractBlock end
 
@@ -68,7 +70,7 @@ macro simple(args...)
     outputs = build_expression!(func_def)
 
     # store the block sparsity for efficient evaluation of the Jacobian
-    sparse_io = sparsity_pattern(func_def[:body], inputs, outputs)
+    sparse_io = sparsity_detector(func_def[:body], inputs, outputs)
     return MacroTools.@q begin
         $(MacroTools.combinedef(func_def))
         $(esc(block_name)) = $(SimpleBlock)(
@@ -143,11 +145,19 @@ function sparsity_detector(body, inputs, outputs)
         end
     end
 
-    return KnownJacobianSparsityDetector(sparsity)
+    return sparsity
 end
 
 function (block::SimpleBlock)(x::NamedTuple)
     return NamedTuple{block.outputs}(block.functor(x[block.inputs]...))
+end
+
+function (block::SimpleBlock)(x::NamedTuple, c::NamedTuple)
+    return block(merge(c, x))
+end
+
+function (block::SimpleBlock)(var::Symbol, x::AbstractVector{<:Real}, c::NamedTuple)
+    return block(NamedTuple{(var,)}((x,)), c)
 end
 
 function (block::SimpleBlock)(x::ComponentArray)
@@ -192,7 +202,7 @@ function (blocks::CombinedBlock)(x::ComponentVector{T}) where {T}
 end
 
 # TODO: this is untested!
-(block::CombinedBlock)(x::ComponentVector, c::ComponentVector) = block(block, [x; c])
+(block::CombinedBlock)(x::ComponentVector, c::ComponentVector) = block([x; c])
 
 inputs(block::CombinedBlock) = block.inputs
 outputs(block::CombinedBlock) = block.outputs
@@ -212,21 +222,11 @@ function model(blocks...; name::String="block")
     return CombinedBlock(dag, blocks, tuple(setdiff(invars, outvars)...), tuple(outvars...), name)
 end
 
-# function get_unknowns(model::CombinedBlock)
-#     invars, outvars = inputs(model), outputs(model)
-#     return tuple(setdiff(invars, outvars)...)
-# end
-
-# function get_targets(model::CombinedBlock)
-#     invars, outvars = inputs(model), outputs(model)
-#     return tuple(setdiff(outvars, invars)...)
-# end
-
 include("jacobians.jl")
 include("steady_state.jl")
 include("systems.jl")
 include("misc.jl")
 include("solutions.jl")
-include("state_space.jl")
+# include("state_space.jl")
 
 end # module DynamicMacroeconomics

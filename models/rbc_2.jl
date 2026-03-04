@@ -20,7 +20,7 @@ end
     return goods_mkt, euler, walras
 end
 
-# make an RBC model and solve its steady state
+# calibrate instead to a target real interest rate
 rbc_model = model(households, firms, market_clearing, name="rbc")
 ss = solve(
     rbc_model,
@@ -31,7 +31,10 @@ ss = solve(
 
 ## JACOBIAN DICTS ##########################################################################
 
-# jacobians of simple blocks are sparse by default
+# Jacobians of simple blocks are sparse by default
 𝒥1 = jacobian(firms, ss, (:K, :L, :Z))
 𝒥2 = jacobian(households, ss, (:K, :L, :w))
 𝒥3 = jacobian(market_clearing, ss, (:C, :I, :K, :L, :Y, :r, :w))
+
+# the full system Jacobian is accessible using a custom sparse chain rule accumulation
+𝒥 = jacobian(rbc_model, ss, (:K, :L, :Z), (:euler, :goods_mkt))
