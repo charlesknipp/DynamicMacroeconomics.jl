@@ -13,11 +13,10 @@ end
     return r, w, Y
 end
 
-@simple function market_clearing(C, I, K, L, Y, r, w, β, γ)
+@simple function market_clearing(C, I, Y, r, β, γ)
     goods_mkt = Y - C - I
     euler = C ^ (-1 / γ) - β * (1 + lead(r)) * lead(C) ^ (-1 / γ)
-    walras = C + K - (1 + r) * lag(K) - w * L
-    return goods_mkt, euler, walras
+    return goods_mkt, euler
 end
 
 # calibrate instead to a target real interest rate
@@ -29,12 +28,9 @@ ss = solve(
     (goods_mkt=0.00, r=0.01, euler=0.00, Y=1.00)
 )
 
-## JACOBIAN DICTS ##########################################################################
-
-# Jacobians of simple blocks are sparse by default
-𝒥1 = jacobian(firms, ss, (:K, :L, :Z))
-𝒥2 = jacobian(households, ss, (:K, :L, :w))
-𝒥3 = jacobian(market_clearing, ss, (:C, :I, :K, :L, :Y, :r, :w))
-
 # the full system Jacobian is accessible using a custom sparse chain rule accumulation
 𝒥 = jacobian(rbc_model, ss, (:K, :L, :Z), (:euler, :goods_mkt))
+FirstOrderSystem(𝒥, (:Z, ))
+
+# alternatively you can obtain the first order system in one line
+FirstOrderSystem(rbc_model, ss, (:K, :L), (:Z, ), (:euler, :goods_mkt))

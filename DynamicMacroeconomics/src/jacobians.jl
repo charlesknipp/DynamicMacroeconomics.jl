@@ -104,8 +104,8 @@ end
 
 ## DIFFERENTIATION INTERFACE ###############################################################
 
-function DifferentiationInterface.jacobian(block::AbstractBlock, ss, inputs; kwargs...)
-    return jacobian(block, ss, inputs, outputs(block); kwargs...)
+function DifferentiationInterface.jacobian(block::AbstractBlock, ss, unknowns; kwargs...)
+    return jacobian(block, ss, unknowns, outputs(block); kwargs...)
 end
 
 function make_jacobian_arguments(block::AbstractBlock, ss::NamedTuple, unknowns)

@@ -31,8 +31,9 @@ ss = solve(
     (euler=0.00, goods_mkt=0.00, shock_res=0.00)
 )
 
-# the first order jacobian can be found like so
+# the full system Jacobian is accessible using a custom sparse chain rule accumulation
 𝒥 = jacobian(rbc_model, ss, (:C, :K, :Z, :ε), (:euler, :goods_mkt, :shock_res))
+FirstOrderSystem(𝒥, (:ε, ))
 
-# and subsequently placed into a first order system with the exogenous shock set to ε
-sys = FirstOrderSystem(𝒥, (:ε, ))
+# alternatively you can obtain the first order system in one line
+FirstOrderSystem(rbc_model, ss, (:C, :K, :Z), (:ε, ), (:euler, :goods_mkt, :shock_res))
