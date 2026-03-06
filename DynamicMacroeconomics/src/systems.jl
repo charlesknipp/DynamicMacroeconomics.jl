@@ -12,16 +12,16 @@ struct FirstOrderSystem{T,ZT<:AbstractArray{T,3},UT<:AbstractArray{T,3}}
 end
 
 # TODO: this may need some work for abstractions like sequence space Jacobians
-function FirstOrderSystem(J::SparseJacobian{NU,NT}, shocks) where {NU,NT}
-    NZ = length(shocks)
-    ∂U = zeros(NT, NU - NZ, 3)
-    ∂Z = zeros(NT, NZ, 3)
+function FirstOrderSystem(J::BlockJacobian{T}, shocks) where {T}
+    NT, NU, NZ = length(outputs(J)), length(inputs(J)), length(shocks)
+    ∂U = zeros(T, NT, NU - NZ, 3)
+    ∂Z = zeros(T, NT, NZ, 3)
     for (o, outvar) in enumerate(outputs(J))
         for (i, invar) in enumerate(setdiff(inputs(J), shocks))
-            ∂U[o, i, :] = J[outvar][invar]
+            ∂U[o, i, :] = J[outvar, invar][-1:1]
         end
         for (i, invar) in enumerate(shocks)
-            ∂Z[o, i, :] = J[outvar][invar]
+            ∂Z[o, i, :] = J[outvar, invar][-1:1]
         end
     end
     return FirstOrderSystem(∂U, ∂Z)

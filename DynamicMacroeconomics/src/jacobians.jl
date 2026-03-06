@@ -1,105 +1,160 @@
-export SparseJacobian, AbstractJacobian
+export SparseImpulse, BlockJacobian, AbstractJacobian
+
+import Base: *, +
+
+## SPARSE IMPULSE ##########################################################################
+
+struct SparseImpulse{Tv,Ti} <: AbstractSparseVector{Tv,Ti}
+    offsets::Dict{Ti,Ti}
+    values::Vector{Tv}
+end
+
+SparseImpulse(::Type{T}) where {T} = SparseImpulse(Dict{Int64,Int64}(), T[])
+
+function SparseImpulse(A::SparseVector{T,Int64}, offset) where {T}
+    B = SparseImpulse(T)
+    for i in SparseArrays.nonzeroinds(A)
+        B[i + offset] = A[i]
+    end
+    return B
+end
+
+function SparseImpulse(A::OffsetVector{T,SparseVector{T,Int64}}) where {T}
+    return SparseImpulse(A.parent, A.offsets[1])
+end
+
+SparseArrays.nonzeroinds(A::SparseImpulse) = collect(keys(A.offsets))
+SparseArrays.nonzeros(A::SparseImpulse) = getfield(A, :values)
+SparseArrays.rowvals(A::SparseImpulse) = SparseArrays.nonzeroinds(A)
+
+function Base.size(A::SparseImpulse)
+    all_keys = keys(A.offsets)
+    return (maximum(all_keys; init=0) - minimum(all_keys; init=1) + 1,)
+end
+
+function Base.getindex(A::SparseImpulse{T}, i::Integer) where {T}
+    if i in keys(A.offsets)
+        return A.values[A.offsets[i]]
+    else
+        return zero(T)
+    end
+end
+
+function Base.getindex(A::SparseImpulse, range::AbstractUnitRange)
+    return [A[i] for i in range]
+end
+
+function Base.setindex!(A::SparseImpulse, value, i::Integer)
+    if i in keys(A.offsets)
+        setindex!(A.values, value, A.offsets[i])
+    else
+        A.offsets[i] = length(A.values) + 1
+        push!(A.values, value)
+    end
+end
+
+function (*)(A::SparseImpulse, B::SparseImpulse)
+    C = SparseImpulse(Base.promote_eltypeof(A.values, B.values))
+    for i in keys(A.offsets), j in keys(B.offsets)
+        C[i + j] = A[i] * B[j]
+    end
+    return C
+end
+
+function (+)(A::SparseImpulse, B::SparseImpulse)
+    C = SparseImpulse(Base.promote_eltypeof(A.values, B.values))
+    for i in union(keys(A.offsets), keys(B.offsets))
+        C[i] = A[i] + B[i]
+    end
+    return C
+end
 
 ## ABSTRACT JACOBIANS ######################################################################
 
-abstract type AbstractJacobian end
+abstract type AbstractJacobian{T} end
 
-# TODO: abhorrent but works...
-struct SparseJacobian{NU,NO} <: AbstractJacobian
-    dict::Dict
-    inputs::NTuple{NU,Symbol}
-    outputs::NTuple{NO,Symbol}
+# TODO: replace the matrix with a vector and use CSR sparsity for indexing
+struct BlockJacobian{T} <: AbstractJacobian{T}
+    partials::Matrix{SparseImpulse{T,Int64}}
+    inputs::Dict{Symbol,Int64}
+    outputs::Dict{Symbol,Int64}
 end
 
-inputs(J::SparseJacobian) = J.inputs
-outputs(J::SparseJacobian) = J.outputs
+DynamicMacroeconomics.inputs(A::BlockJacobian) = keys(A.inputs)
+DynamicMacroeconomics.outputs(A::BlockJacobian) = keys(A.outputs)
 
-function SparseJacobian(M::AbstractMatrix, unknowns, targets)
-    # visually disgusting, but is type stable
-    jac_dict = Dict(
-        target => Dict(
-            unknown => centered(
-                M[o, (3 * i - 2) : (3 * i)]
-            ) for (i, unknown) in enumerate(unknowns)
-        ) for (o, target) in enumerate(targets)
-    )
-    return SparseJacobian(jac_dict, unknowns, targets)
+function Base.show(io::IO, A::BlockJacobian{T}) where {T}
+    inputs = join(keys(A.inputs), ", ")
+    outputs = join(keys(A.outputs), ", ")
+    return print(io, "BlockJacobian{$T}:\n  ($inputs) → ($outputs)")
 end
 
-# identity Jacobian for each contemporaneous input
-function SparseJacobian(::Type{T}, unknowns::NTuple{N,Symbol}) where {N,T<:Real}
-    return SparseJacobian(
-        Dict(i => Dict(i => centered(T[0, 1, 0])) for i in unknowns), unknowns, unknowns
+function BlockJacobian(::Type{T}, inputs, outputs) where {T}
+    base_impulse = SparseImpulse(T)
+    return BlockJacobian(
+        fill(deepcopy(base_impulse), length(outputs), length(inputs)),
+        Dict(var => i for (i, var) in enumerate(inputs)),
+        Dict(var => i for (i, var) in enumerate(outputs)),
     )
 end
 
-function Base.merge(J1::SparseJacobian, J2::SparseJacobian)
-    inputs(J1) != inputs(J2) && @error("cannot combine jacobians with different inputs")
-    new_dict = merge(J1.dict, J2.dict)
-    return SparseJacobian(new_dict, inputs(J1), tuple(keys(new_dict)...))
-end
-
-Base.getindex(J::SparseJacobian, output::Symbol) = J.dict[output]
-Base.getindex(J::SparseJacobian, output::Symbol, input::Symbol) = J.dict[output][input]
-
-function subset(J::SparseJacobian, outputs)
-    subdict = filter(p -> p.first in outputs, J.dict)
-    return SparseJacobian(subdict, inputs(J), tuple(outputs...))
-end
-
-# ensures that lagged intermediates are not already functions of lagged variables
-function resize_warn(∂::OffsetVector)
-    ∂[-2] != 0 && @error("model has more than 1 lag")
-    ∂[2] != 0 && @error("model has more than 1 lead")
-    return OffsetArrays.centered(∂[-1:1])
-end
-
-# get biggest lead and lag
-function offset_extrema(∂::OffsetVector)
-    offsets = keys(∂)
-    return first(offsets), last(offsets)
-end
-
-# get combined biggest lead and lag
-function offset_extrema(∂Y::OffsetVector, ∂X::OffsetVector)
-    return offset_extrema(∂Y) .+ offset_extrema(∂X)
-end
-
-# multiply two offset vectors to have closed form system multiplication
-function chain_rule(∂Y∂X::OffsetVector, ∂X∂Z::OffsetVector)
-    lag, lead = offset_extrema(∂Y∂X, ∂X∂Z)
-    T = Base.promote_eltype(∂Y∂X, ∂X∂Z)
-    ∂Y∂Z = OffsetVector(zeros(T, lead - lag + 1), lag - 1)
-    for i in keys(∂Y∂X), j in keys(∂X∂Z)
-        ∂Y∂Z[j+i] += ∂Y∂X[i] * ∂X∂Z[j]
+function BlockJacobian(::Type{T}, varnames) where {T}
+    id = SparseImpulse(T)
+    id[0] = 1
+    A = BlockJacobian(T, varnames, varnames)
+    for var in varnames
+        A[var, var] = id
     end
-    return resize_warn(∂Y∂Z)
+    return A
 end
 
-# type generic, which may be a problem for AD
-function chain_rule(J_om::SparseJacobian, J_mi::SparseJacobian)
-    outvars = outputs(J_om)
-    m_list = union(inputs(J_om), outputs(J_mi))
-    invars = inputs(J_mi)
+function BlockJacobian(M::AbstractMatrix{T}, unknowns, targets) where {T}
+    A = BlockJacobian(T, unknowns, targets)
+    for (i, unknown) in enumerate(unknowns), (o, target) in enumerate(targets)
+        A[target, unknown] = SparseImpulse(centered(M[o, (3 * i - 2):(3 * i)]))
+    end
+    return A
+end
 
-    J_oi = Dict(o => Dict() for o in outvars)
-    for o in outvars, i in invars
-        Jout = nothing
-        for m in m_list
-            if (m in keys(J_om[o])) && (i in keys(J_mi[m]))
-                if isnothing(Jout)
-                    Jout = chain_rule(J_om[o][m], J_mi[m][i])
-                else
-                    Jout += chain_rule(J_om[o][m], J_mi[m][i])
-                end
-            end
-        end
-        if !isnothing(Jout)
-            J_oi[o][i] = Jout
+function Base.getindex(A::BlockJacobian, output::Symbol, input::Symbol)
+    return getindex(A.partials, A.outputs[output], A.inputs[input])
+end
+
+function Base.setindex!(A::BlockJacobian, val, output::Symbol, input::Symbol)
+    # this should ALMOST never be used outside of Base.*
+    return setindex!(A.partials, val, A.outputs[output], A.inputs[input])
+end
+
+function (*)(A::BlockJacobian{AT}, B::BlockJacobian{BT}) where {AT,BT}
+    invars = inputs(B)
+    intermediates = union(inputs(A), outputs(B))
+    outvars = outputs(A)
+    C = BlockJacobian(Base.promote_type(AT, BT), invars, outvars)
+    for o in outvars, i in invars, m in intermediates
+        if m in inputs(A)
+            C[o, i] += A[o, m] * B[m, i]
         end
     end
+    return C
+end
 
-    return SparseJacobian(J_oi, invars, outvars)
+function Base.merge(A::BlockJacobian{AT}, B::BlockJacobian{BT}) where {AT,BT}
+    invars = intersect(inputs(A), inputs(B))
+    outvars = symdiff(outputs(A), outputs(B))
+    C = BlockJacobian(Base.promote_type(AT, BT), invars, outvars)
+    for J in (A, B), o in outputs(J), i in inputs(J)
+        C[o, i] = J[o, i]
+    end
+    return C
+end
+
+# TODO: please get rid of this extraneous allocation
+function subset(A::BlockJacobian{T}, targets) where {T}
+    B = BlockJacobian(T, inputs(A), targets)
+    for o in targets, i in inputs(A)
+        B[o, i] = A[o, i]
+    end
+    return B
 end
 
 ## DIFFERENTIATION INTERFACE ###############################################################
@@ -119,9 +174,9 @@ function make_jacobian_arguments(block::AbstractBlock, ss::ComponentVector, unkn
     return ComponentVector(; X...), ComponentVector(; C...)
 end
 
-sparse_jacobian(block::SimpleBlock, unknowns) = sparse_jacobian(
-    block, unknowns, block.outputs
-)
+function sparse_jacobian(block::SimpleBlock, unknowns)
+    return sparse_jacobian(block, unknowns, block.outputs)
+end
 
 function sparse_jacobian(block::SimpleBlock, unknowns, targets)
     rowmap = DynamicMacroeconomics.named_tuple(block.outputs)
@@ -147,18 +202,18 @@ function DifferentiationInterface.jacobian(
     M = DifferentiationInterface.jacobian(
         (x, c) -> block(x, c)[targets], backend, X, Constant(C)
     )
-    return SparseJacobian(M, unknowns, targets)
+    return BlockJacobian(M, unknowns, targets)
 end
 
 function DifferentiationInterface.jacobian(
     blocks::CombinedBlock{F,NU,NO}, ss, unknowns, targets; backend=AutoForwardDiff()
 ) where {F,NU,NO}
     all_outputs = outputs(blocks)
-    total_jacobian = SparseJacobian(Float64, unknowns)
+    total_jacobian = BlockJacobian(eltype(ss), unknowns)
     for block in blocks
         intermediates = tuple((unknowns ∩ inputs(block)) ∪ (all_outputs ∩ inputs(block))...)
         block_jacobian = jacobian(block, ss, intermediates, outputs(block); backend)
-        total_jacobian = merge(total_jacobian, chain_rule(block_jacobian, total_jacobian))
+        total_jacobian = merge(total_jacobian, block_jacobian * total_jacobian)
     end
     return subset(total_jacobian, targets)
 end
