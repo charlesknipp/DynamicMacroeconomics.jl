@@ -22,17 +22,24 @@ using GeneralisedFilters
 using Random
 ```
 
-We begin by defining the model equations, where each of the function arguments are state variables (including shocks).
+We begin by defining the model equations, where each of the function arguments are state variables (including shocks). The desired syntax subscribes to the DAG paradigm ala SSJ, which implies variable substitution across blocks without a symbolic backend.
 
 ```julia
-@simple function households(C, K, Z, α, β, γ, δ)
-    euler = (C ^ -γ) - (β * (α * lead(Z) * K ^ (α - 1) + 1 - δ) * (lead(C) ^ -γ))
-    return euler
+@simple function market_clearing(C, Y, I, r, β, γ)
+    euler = (C^-γ) - (β * (1 + lead(r)) * (lead(C)^-γ))
+    goods_mkt = Y - C - I
+    return euler, goods_mkt
 end
 
-@simple function firms(Z, K, C, α, δ)
-    walras = (Z * lag(K) ^ α - C) + (1 - δ) * lag(K) - K
-    return walras
+@simple function firms(Z, K, α, δ)
+    r = α * Z * lag(K)^(α - 1) - δ
+    Y = Z * lag(K)^α
+    return r, Y
+end
+
+@simple function households(K, δ)
+    I = K - (1 - δ) * lag(K)
+    return I
 end
 
 @simple function shocks(Z, ρ, ε)
@@ -44,18 +51,20 @@ end
 Steady states are calculated internally, using `NonlinearSolve.jl` as a backend for optimization.
 
 ```julia
-rbc_model = solve(
-    model(households, firms, shocks),
-    (C=1.00, K=1.00, Z=1.00),
-    (γ=1.00, α=0.30, δ=0.25, β=(1/1.05), ρ=0.80, ε=0.00)
+rbc_model = model(market_clearing, firms, households, shocks; name="rbc")
+ss = solve(
+    rbc_model,
+    (γ=1.00, α=0.30, δ=0.25, β=(1 / 1.05), ρ=0.80, ε=0.00),
+    (C=1.00, K=0.40, Z=0.40),
+    (euler=0.00, goods_mkt=0.00, shock_res=0.00),
 )
 ```
 
 Now that the model is sufficiently defined, we can obtain the policy function by solving the first order perturbation either by state space or sequence space methods.
 
 ```julia
-A, B = solve(rbc_model, [:K, :C, :Z], [:ε]; order=1, algo=QuadraticIteration())
-GE   = solve(rbc_model, [:K, :C, :Z], [:ε]; order=1, algo=SequenceJacobian(150))
+A, B = solve(rbc_model, ss, [:K, :C, :Z], [:ε]; order=1, algo=QuadraticIteration())
+GE   = solve(rbc_model, ss, [:K, :C, :Z], [:ε]; order=1, algo=SequenceJacobian(150))
 ```
 
 We encourage the user to experiment with `SSMProblems.jl` to create a potentially nonlinear measurement, but we include a constructor for linear Gaussian state space models. To demonstrate we can create a state space observing consumption with a measurement noise of 1.0, and simulate 100 time periods.
@@ -67,9 +76,11 @@ x, y = sample(rng, ssm, 100)
 
 Using `GeneralizedFilters.jl`, we can extract the loglikelihood with the Kalman filter. This is used in `models/rbc.jl` for estimation. More details can be provided in that script.
 
-## FAQ
+## Closing Remarks
 
 - Models only support one lead and one lag as of now.
-- QZ does not work for most models, since it was made prior to the macro which records timings.
+- Solving the first order perturbation is not guaranteed to work right now.
+- I plan on removing the `ComponentArrays.jl` dependency since it may have some odd type conversions.
+- Yes, I know the docs are broken and it will get fixed as soon as I can solve models consistently.
 
 Just ask me for questions on the implementation, and if you see anything questionable feel free to raise an issue or a PR.
