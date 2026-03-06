@@ -13,7 +13,7 @@ using SparseConnectivityTracer
 using SparseMatrixColorings
 
 using DifferentiationInterface
-import ForwardDiff
+using ForwardDiff: ForwardDiff
 using ADTypes
 
 using NonlinearSolve
@@ -40,9 +40,9 @@ offset(x::AbstractVector, t::Int) = x[2 + t]
 abstract type AbstractBlock end
 
 function Base.show(io::IO, b::AbstractBlock)
-    inputs  = join(b.inputs, ", ")
+    inputs = join(b.inputs, ", ")
     outputs = join(b.outputs, ", ")
-    print(io, "$(b.name): ($inputs) → ($outputs)")
+    return print(io, "$(b.name): ($inputs) → ($outputs)")
 end
 
 function inputs(::AbstractBlock) end
@@ -89,7 +89,7 @@ function build_expression!(func_dict)
             else
                 # return singular targets as a tuple
                 push!(targets, target)
-                return :(return ($target, ))
+                return :(return ($target,))
             end
         else
             return ex
@@ -119,7 +119,7 @@ end
 named_tuple(x::NTuple{N,Symbol}) where {N} = NamedTuple{x}(keys(x))
 
 function sparsity_detector(body, inputs, outputs)
-    sparsity = spzeros(Bool, length(outputs), length(inputs)*3)
+    sparsity = spzeros(Bool, length(outputs), length(inputs) * 3)
     colmap = named_tuple(inputs)
     rowmap = named_tuple(outputs)
 
@@ -139,7 +139,7 @@ function sparsity_detector(body, inputs, outputs)
         MacroTools.postwalk(exprmap[out]) do ex
             if @capture(ex, offset(x_, t_))
                 i, j = rowmap[out], colmap[x]
-                sparsity[i, 3*(j-1) + (t+2)] = 1
+                sparsity[i, 3 * (j - 1) + (t + 2)] = 1
             end
             return ex
         end
@@ -219,7 +219,9 @@ function model(blocks...; name::String="block")
 
     blocks = blocks[topological_sort(dag)]
     invars, outvars = union(inputs.(blocks)...), union(outputs.(blocks)...)
-    return CombinedBlock(dag, blocks, tuple(setdiff(invars, outvars)...), tuple(outvars...), name)
+    return CombinedBlock(
+        dag, blocks, tuple(setdiff(invars, outvars)...), tuple(outvars...), name
+    )
 end
 
 include("jacobians.jl")

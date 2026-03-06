@@ -45,10 +45,10 @@ Base.@kwdef struct QuadraticIteration
 end
 
 function solve(system::FirstOrderSystem, algo::QuadraticIteration)
-    C, B, A = eachslice(system.∂Z, dims=3)
+    C, B, A = eachslice(system.∂Z; dims=3)
     ghx = zero(A)
 
-    for _ in 1:algo.max_iters
+    for _ in 1:(algo.max_iters)
         ghx = -(A * ghx + B) \ C
         if maximum(C + B * ghx + A * ghx * ghx) < algo.tol
             break
@@ -72,11 +72,11 @@ function convmat(basis::AbstractVector{T}, N) where {T<:Real}
     return Toeplitz([basis[2:-1:1]; padding], [basis[2:end]; padding])
 end
 
-function convmat(basis::AbstractArray{T, 3}, N) where {T<:Real}
+function convmat(basis::AbstractArray{T,3}, N) where {T<:Real}
     nx, ny, _ = size(basis)
     M = zeros(T, nx * N, ny * N)
     for i in 1:nx, j in 1:ny
-        M[(N*(i-1)+1):N*i, N*(j-1)+1:N*j] = convmat(basis[i, j, :], N)
+        M[(N * (i - 1) + 1):(N * i), (N * (j - 1) + 1):(N * j)] = convmat(basis[i, j, :], N)
     end
     return M
 end

@@ -13,7 +13,7 @@ function compute_residuals(
     block::AbstractBlock,
     calibration::ComponentArray,
     unknowns::ComponentArray,
-    targets::ComponentArray
+    targets::ComponentArray,
 )
     outputs = block(merge(unknowns, calibration))
     return outputs[keys(targets)] - targets
@@ -31,8 +31,8 @@ function solve(
     calibration::ComponentArray,
     unknowns::ComponentArray,
     targets::ComponentArray;
-    algorithm = NewtonRaphson(; autodiff=AutoForwardDiff()),
-    kwargs...
+    algorithm=NewtonRaphson(; autodiff=AutoForwardDiff()),
+    kwargs...,
 )
     # define the problem akin to the SciML ecosystem
     problem = NonlinearProblem(
@@ -54,13 +54,13 @@ function solve(
     calibration::NamedTuple,
     unknowns::NamedTuple,
     targets::NamedTuple;
-    kwargs...
+    kwargs...,
 )
     return solve(
         block,
         ComponentArray(calibration),
         ComponentArray(unknowns),
         ComponentArray(targets);
-        kwargs...
+        kwargs...,
     )
 end
