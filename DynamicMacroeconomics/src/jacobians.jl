@@ -1,38 +1,38 @@
-export SparseImpulse, BlockJacobian, AbstractJacobian
+export ToeplitzSymbol, BlockJacobian, AbstractJacobian
 
 import Base: *, +
 
 ## SPARSE IMPULSE ##########################################################################
 
-struct SparseImpulse{Tv,Ti} <: AbstractSparseVector{Tv,Ti}
+struct ToeplitzSymbol{Tv,Ti} <: AbstractSparseVector{Tv,Ti}
     offsets::Dict{Ti,Ti}
     values::Vector{Tv}
 end
 
-SparseImpulse(::Type{T}) where {T} = SparseImpulse(Dict{Int64,Int64}(), T[])
+ToeplitzSymbol(::Type{T}) where {T} = ToeplitzSymbol(Dict{Int64,Int64}(), T[])
 
-function SparseImpulse(A::SparseVector{T,Int64}, offset) where {T}
-    B = SparseImpulse(T)
+function ToeplitzSymbol(A::ToeplitzSymbol{T,Int64}, offset) where {T}
+    B = ToeplitzSymbol(T)
     for i in SparseArrays.nonzeroinds(A)
         B[i + offset] = A[i]
     end
     return B
 end
 
-function SparseImpulse(A::OffsetVector{T,SparseVector{T,Int64}}) where {T}
-    return SparseImpulse(A.parent, A.offsets[1])
+function ToeplitzSymbol(A::OffsetVector{T,SparseVector{T,Int64}}) where {T}
+    return ToeplitzSymbol(A.parent, A.offsets[1])
 end
 
-SparseArrays.nonzeroinds(A::SparseImpulse) = collect(keys(A.offsets))
-SparseArrays.nonzeros(A::SparseImpulse) = getfield(A, :values)
-SparseArrays.rowvals(A::SparseImpulse) = SparseArrays.nonzeroinds(A)
+SparseArrays.nonzeroinds(A::ToeplitzSymbol) = collect(keys(A.offsets))
+SparseArrays.nonzeros(A::ToeplitzSymbol) = getfield(A, :values)
+SparseArrays.rowvals(A::ToeplitzSymbol) = SparseArrays.nonzeroinds(A)
 
-function Base.size(A::SparseImpulse)
+function Base.size(A::ToeplitzSymbol)
     all_keys = keys(A.offsets)
     return (maximum(all_keys; init=0) - minimum(all_keys; init=1) + 1,)
 end
 
-function Base.getindex(A::SparseImpulse{T}, i::Integer) where {T}
+function Base.getindex(A::ToeplitzSymbol{T}, i::Integer) where {T}
     if i in keys(A.offsets)
         return A.values[A.offsets[i]]
     else
@@ -40,11 +40,12 @@ function Base.getindex(A::SparseImpulse{T}, i::Integer) where {T}
     end
 end
 
-function Base.getindex(A::SparseImpulse, range::AbstractUnitRange)
+# TODO: return a ToeplitzSymbol instead of a regular vector...
+function Base.getindex(A::ToeplitzSymbol, range::OrdinalRange)
     return [A[i] for i in range]
 end
 
-function Base.setindex!(A::SparseImpulse, value, i::Integer)
+function Base.setindex!(A::ToeplitzSymbol, value, i::Integer)
     if i in keys(A.offsets)
         setindex!(A.values, value, A.offsets[i])
     else
@@ -53,21 +54,24 @@ function Base.setindex!(A::SparseImpulse, value, i::Integer)
     end
 end
 
-function (*)(A::SparseImpulse, B::SparseImpulse)
-    C = SparseImpulse(Base.promote_eltypeof(A.values, B.values))
+function (*)(A::ToeplitzSymbol, B::ToeplitzSymbol)
+    C = ToeplitzSymbol(Base.promote_eltypeof(A.values, B.values))
     for i in keys(A.offsets), j in keys(B.offsets)
         C[i + j] = A[i] * B[j]
     end
     return C
 end
 
-function (+)(A::SparseImpulse, B::SparseImpulse)
-    C = SparseImpulse(Base.promote_eltypeof(A.values, B.values))
+function (+)(A::ToeplitzSymbol, B::ToeplitzSymbol)
+    C = ToeplitzSymbol(Base.promote_eltypeof(A.values, B.values))
     for i in union(keys(A.offsets), keys(B.offsets))
         C[i] = A[i] + B[i]
     end
     return C
 end
+
+# for use in sequence jacobian solver
+Toeplitz(A::ToeplitzSymbol, T::Integer) = Toeplitz(A[0:-1:-T], A[0:T])
 
 ## ABSTRACT JACOBIANS ######################################################################
 
@@ -75,7 +79,7 @@ abstract type AbstractJacobian{T} end
 
 # TODO: replace the matrix with a vector and use CSR sparsity for indexing
 struct BlockJacobian{T} <: AbstractJacobian{T}
-    partials::Matrix{SparseImpulse{T,Int64}}
+    partials::Matrix{ToeplitzSymbol{T,Int64}}
     inputs::Dict{Symbol,Int64}
     outputs::Dict{Symbol,Int64}
 end
@@ -90,7 +94,7 @@ function Base.show(io::IO, A::BlockJacobian{T}) where {T}
 end
 
 function BlockJacobian(::Type{T}, inputs, outputs) where {T}
-    base_impulse = SparseImpulse(T)
+    base_impulse = ToeplitzSymbol(T)
     return BlockJacobian(
         fill(deepcopy(base_impulse), length(outputs), length(inputs)),
         Dict(var => i for (i, var) in enumerate(inputs)),
@@ -99,7 +103,7 @@ function BlockJacobian(::Type{T}, inputs, outputs) where {T}
 end
 
 function BlockJacobian(::Type{T}, varnames) where {T}
-    id = SparseImpulse(T)
+    id = ToeplitzSymbol(T)
     id[0] = 1
     A = BlockJacobian(T, varnames, varnames)
     for var in varnames
@@ -111,7 +115,7 @@ end
 function BlockJacobian(M::AbstractMatrix{T}, unknowns, targets) where {T}
     A = BlockJacobian(T, unknowns, targets)
     for (i, unknown) in enumerate(unknowns), (o, target) in enumerate(targets)
-        A[target, unknown] = SparseImpulse(centered(M[o, (3 * i - 2):(3 * i)]))
+        A[target, unknown] = ToeplitzSymbol(centered(M[o, (3 * i - 2):(3 * i)]))
     end
     return A
 end
