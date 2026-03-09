@@ -4,6 +4,7 @@ import Base: *, +
 
 ## SPARSE IMPULSE ##########################################################################
 
+# TODO: get rid of the offsets dict and move to a AbstractToeplitz type definition
 struct ToeplitzSymbol{Tv,Ti} <: AbstractSparseVector{Tv,Ti}
     offsets::Dict{Ti,Ti}
     values::Vector{Tv}
@@ -11,7 +12,8 @@ end
 
 ToeplitzSymbol(::Type{T}) where {T} = ToeplitzSymbol(Dict{Int64,Int64}(), T[])
 
-function ToeplitzSymbol(A::ToeplitzSymbol{T,Int64}, offset) where {T}
+# TODO: this is definitely slow
+function ToeplitzSymbol(A::SparseVector{T,Int64}, offset) where {T}
     B = ToeplitzSymbol(T)
     for i in SparseArrays.nonzeroinds(A)
         B[i + offset] = A[i]
@@ -41,8 +43,8 @@ function Base.getindex(A::ToeplitzSymbol{T}, i::Integer) where {T}
 end
 
 # TODO: return a ToeplitzSymbol instead of a regular vector...
-function Base.getindex(A::ToeplitzSymbol, range::OrdinalRange)
-    return [A[i] for i in range]
+function Base.getindex(A::ToeplitzSymbol{T}, range::AbstractUnitRange) where {T}
+    return T[A[i] for i in range]
 end
 
 function Base.setindex!(A::ToeplitzSymbol, value, i::Integer)
@@ -57,7 +59,7 @@ end
 function (*)(A::ToeplitzSymbol, B::ToeplitzSymbol)
     C = ToeplitzSymbol(Base.promote_eltypeof(A.values, B.values))
     for i in keys(A.offsets), j in keys(B.offsets)
-        C[i + j] = A[i] * B[j]
+        C[i + j] += A[i] * B[j]
     end
     return C
 end
@@ -71,7 +73,15 @@ function (+)(A::ToeplitzSymbol, B::ToeplitzSymbol)
 end
 
 # for use in sequence jacobian solver
-Toeplitz(A::ToeplitzSymbol, T::Integer) = Toeplitz(A[0:-1:-T], A[0:T])
+function ToeplitzMatrices.Toeplitz(A::ToeplitzSymbol{AT}, T::Integer) where {AT}
+    spc = spzeros(AT, T)
+    spr = spzeros(AT, T)
+    for i in keys(A.offsets)
+        i >= 0 && (spc[1 + i] = A[i])
+        i <= 0 && (spr[1 - i] = A[i])
+    end
+    return Toeplitz(spr, spc)
+end
 
 ## ABSTRACT JACOBIANS ######################################################################
 
