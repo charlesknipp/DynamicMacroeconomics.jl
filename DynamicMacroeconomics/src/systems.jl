@@ -31,3 +31,21 @@ function FirstOrderSystem(model::CombinedBlock, ss, unknowns, shocks, targets; k
     J = jacobian(model, ss, tuple(union(unknowns, shocks)...), targets; kwargs...)
     return FirstOrderSystem(J, shocks)
 end
+
+## SCHMITT GROHE URIBE #####################################################################
+
+# this is probably overkill, but it's efficient enough and reads nicely
+shift(::Type{T}, i::Integer) where {T} = ToeplitzSymbol(Dict(i => 1), T[1])
+shift(i::Integer) = shift(Float64, i)
+
+# this shift forward the targets with lagged variables so we can cast into the SGU form
+function stack_time!(A::BlockJacobian{T}) where {T}
+    for target in outputs(A)
+        if any([-1 in keys(A[target, unknown].offsets) for unknown in inputs(A)])
+            for unknown in inputs(A)
+                A[target, unknown] = A[target, unknown] * shift(T, 1)
+            end
+        end
+    end
+    return A
+end
