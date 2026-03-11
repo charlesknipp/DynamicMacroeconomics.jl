@@ -1,7 +1,7 @@
 using DynamicMacroeconomics
 
 @simple function euler_equation(y, πs, i, ωs, γ)
-    euler_res = y - lead(y) + (1 / γ) * (i - lag(πs)) - ωs
+    euler_res = y - lead(y) + (1 / γ) * (i - lead(πs)) - ωs
     return euler_res
 end
 
@@ -54,7 +54,7 @@ ss1 = solve(
 );
 
 # add AR(1) shocks
-teq_model_2 = model(euler_equation, phillips_curve, taylor, ar_shocks)
+teq_model_2 = model(euler_equation, phillips_curve, taylor, ar_shocks, name="teq-2")
 ss2 = solve(
     teq_model_2,
     (θ2..., εs=0, εd=0, εm=0),
