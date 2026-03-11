@@ -4,6 +4,8 @@ import Base: *, +
 
 ## SPARSE IMPULSE ##########################################################################
 
+# TODO: write custom pretty printer since we assume sorted keys in SparseVector
+
 # TODO: get rid of the offsets dict and move to a AbstractToeplitz type definition
 struct ToeplitzSymbol{Tv,Ti} <: AbstractSparseVector{Tv,Ti}
     offsets::Dict{Ti,Ti}
@@ -12,7 +14,6 @@ end
 
 ToeplitzSymbol(::Type{T}) where {T} = ToeplitzSymbol(Dict{Int64,Int64}(), T[])
 
-# TODO: this is definitely slow
 function ToeplitzSymbol(A::SparseVector{T,Int64}, offset) where {T}
     B = ToeplitzSymbol(T)
     for i in SparseArrays.nonzeroinds(A)
@@ -29,9 +30,12 @@ SparseArrays.nonzeroinds(A::ToeplitzSymbol) = collect(keys(A.offsets))
 SparseArrays.nonzeros(A::ToeplitzSymbol) = getfield(A, :values)
 SparseArrays.rowvals(A::ToeplitzSymbol) = SparseArrays.nonzeroinds(A)
 
+# TODO: either rework this or entirely rewrite the ToeplitzSymbol struct
 function Base.size(A::ToeplitzSymbol)
     all_keys = keys(A.offsets)
-    return (maximum(all_keys; init=0) - minimum(all_keys; init=1) + 1,)
+    return (
+        maximum(all_keys; init=typemin(Int64)) - minimum(all_keys; init=typemax(Int64)) + 1,
+    )
 end
 
 function Base.getindex(A::ToeplitzSymbol{T}, i::Integer) where {T}
