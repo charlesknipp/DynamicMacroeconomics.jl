@@ -9,8 +9,6 @@ using LinearAlgebra
 using ToeplitzMatrices
 
 using SparseArrays
-using SparseConnectivityTracer
-using SparseMatrixColorings
 
 using DifferentiationInterface
 using ForwardDiff: ForwardDiff
@@ -24,9 +22,6 @@ using Graphs
 using ComponentArrays
 using OffsetArrays
 
-using OffsetArrays: centered
-using ADTypes: KnownJacobianSparsityDetector
-
 export model, @simple, lead, lag, jacobian
 export SimpleBlock, CombinedBlock
 export inputs, outputs
@@ -34,8 +29,8 @@ export inputs, outputs
 # for steady state evaluations
 offset(x::Real, ::Int) = x
 
-# for the time being just assume size(x) = (3)
-offset(x::AbstractVector, t::Int) = x[2 + t]
+# we must pass an offset array for time offsets
+offset(x::OffsetVector, t::Int) = x[t]
 
 abstract type AbstractBlock end
 
@@ -108,44 +103,36 @@ function build_expression!(func_dict)
         if @capture(ex, f_(offset(var_, 0)))
             f == :lead && return :(offset($var, 1))
             f == :lag && return :(offset($var, -1))
-        else
-            return ex
         end
+        return ex
     end
 
     return tuple(targets...)
 end
 
-named_tuple(x::NTuple{N,Symbol}) where {N} = NamedTuple{x}(keys(x))
-
 function sparsity_detector(body, inputs, outputs)
-    sparsity = spzeros(Bool, length(outputs), length(inputs) * 3)
-    colmap = named_tuple(inputs)
-    rowmap = named_tuple(outputs)
-
-    # make all recursive substitutions
+    # make relevant substitutions for proper index handling
     exprmap = Dict{Symbol,Expr}()
     MacroTools.postwalk(body) do ex
         if @capture(ex, LHS_ = RHS_)
             exprmap[LHS] = RHS
+            (LHS in outputs) && return ex
         elseif (ex in keys(exprmap))
             return exprmap[ex]
         end
         return ex
     end
 
-    # set an indicator for the the time offsets
+    # return a sorted set per each argument of populated indices
+    offset_dict = Dict(arg => Set{Int64}() for arg in inputs)
     for out in outputs
         MacroTools.postwalk(exprmap[out]) do ex
-            if @capture(ex, offset(x_, t_))
-                i, j = rowmap[out], colmap[x]
-                sparsity[i, 3 * (j - 1) + (t + 2)] = 1
-            end
+            @capture(ex, offset(x_, t_)) && push!(offset_dict[x], t) 
             return ex
         end
     end
 
-    return sparsity
+    return Dict(k => minimum(v):maximum(v) for (k, v) in offset_dict)
 end
 
 function (block::SimpleBlock)(x::NamedTuple)
@@ -160,10 +147,13 @@ function (block::SimpleBlock)(var::Symbol, x::AbstractVector{<:Real}, c::NamedTu
     return block(NamedTuple{(var,)}((x,)), c)
 end
 
+# workaround for AD using OffsetArrays
+offset_component(X::Real, offset_range) = X
+offset_component(X::AbstractVector, offset_range) = OffsetVector(X, offset_range)
+
 function (block::SimpleBlock)(x::ComponentArray)
-    return ComponentVector(
-        collect(block.functor(getproperty.(Ref(x), block.inputs)...)), Axis(block.outputs)
-    )
+    fargs = [offset_component(x[i], block.sparsity[i]) for i in inputs(block)]
+    return ComponentVector(collect(block.functor(fargs...)), Axis(block.outputs))
 end
 
 # when taking partials given a constant (not type stable)
@@ -200,9 +190,6 @@ function (blocks::CombinedBlock)(x::ComponentVector{T}) where {T}
     out = ComponentVector{T}()
     return combined!(blocks, out, x)
 end
-
-# TODO: this is untested!
-(block::CombinedBlock)(x::ComponentVector, c::ComponentVector) = block([x; c])
 
 inputs(block::CombinedBlock) = block.inputs
 outputs(block::CombinedBlock) = block.outputs

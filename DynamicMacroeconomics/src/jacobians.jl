@@ -1,4 +1,5 @@
 export ToeplitzSymbol, BlockJacobian, AbstractJacobian
+export test_jacobian
 
 import Base: *, +
 
@@ -126,10 +127,18 @@ function BlockJacobian(::Type{T}, varnames) where {T}
     return A
 end
 
-function BlockJacobian(M::AbstractMatrix{T}, unknowns, targets) where {T}
+# TODO: this could be cleaned up and rid of redundant allocations
+function BlockJacobian(M::AbstractMatrix{T}, unknowns, targets, offsets) where {T}
     A = BlockJacobian(T, unknowns, targets)
-    for (i, unknown) in enumerate(unknowns), (o, target) in enumerate(targets)
-        A[target, unknown] = ToeplitzSymbol(centered(M[o, (3 * i - 2):(3 * i)]))
+    for (o, target) in enumerate(targets)
+        flr = 1
+        for unknown in unknowns
+            range = length(offsets[unknown])
+            A[target, unknown] = ToeplitzSymbol(
+                offset_component(sparse(M[o, flr:(flr + range - 1)]), offsets[unknown])
+            )
+            flr += range
+        end
     end
     return A
 end
@@ -181,9 +190,12 @@ function DifferentiationInterface.jacobian(block::AbstractBlock, ss, unknowns; k
     return jacobian(block, ss, unknowns, outputs(block); kwargs...)
 end
 
+# idk if fill is appropriate here, so I use a list comprehension instead
+vectorize(val::Real, offsets) = [val for _ in eachindex(offsets)]
+
 function make_jacobian_arguments(block::AbstractBlock, ss::NamedTuple, unknowns)
     C = ss[setdiff(inputs(block), unknowns)]
-    X = NamedTuple{unknowns}([fill(i, 3) for i in ss[unknowns]])
+    X = NamedTuple{unknowns}([vectorize(ss[i], block.sparsity[i]) for i in unknowns])
     return X, C
 end
 
@@ -192,35 +204,15 @@ function make_jacobian_arguments(block::AbstractBlock, ss::ComponentVector, unkn
     return ComponentVector(; X...), ComponentVector(; C...)
 end
 
-function sparse_jacobian(block::SimpleBlock, unknowns)
-    return sparse_jacobian(block, unknowns, block.outputs)
-end
-
-function sparse_jacobian(block::SimpleBlock, unknowns, targets)
-    rowmap = DynamicMacroeconomics.named_tuple(block.outputs)
-    colmap = map(DynamicMacroeconomics.named_tuple(block.inputs)) do j
-        (3 * (j - 1) + 1):(3 * j)
-    end
-    sparsity_pattern = getdata(
-        ComponentArray(block.sparsity, Axis(rowmap), Axis(colmap))[targets, unknowns]
-    )
-    return KnownJacobianSparsityDetector(sparsity_pattern)
-end
-
 function DifferentiationInterface.jacobian(
-    block::SimpleBlock, ss, unknowns, targets; backend=AutoForwardDiff(), sparse=true
+    block::SimpleBlock, ss, unknowns, targets; backend=AutoForwardDiff()
 )
     targets = tuple(intersect(targets, outputs(block))...)
     X, C = make_jacobian_arguments(block, ss, unknowns)
-    if sparse
-        backend = AutoSparse(
-            backend, sparse_jacobian(block, unknowns, targets), GreedyColoringAlgorithm()
-        )
-    end
     M = DifferentiationInterface.jacobian(
         (x, c) -> block(x, c)[targets], backend, X, Constant(C)
     )
-    return BlockJacobian(M, unknowns, targets)
+    return BlockJacobian(M, unknowns, targets, block.sparsity)
 end
 
 function DifferentiationInterface.jacobian(
