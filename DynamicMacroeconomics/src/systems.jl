@@ -38,7 +38,7 @@ end
 shift(::Type{T}, i::Integer) where {T} = ToeplitzSymbol(Dict(i => 1), T[1])
 shift(i::Integer) = shift(Float64, i)
 
-# this shift forward the targets with lagged variables so we can cast into the SGU form
+# shift forward the targets with lagged variables so we can cast into the SGU form
 function stack_time!(A::BlockJacobian{T}) where {T}
     for target in outputs(A)
         if any([-1 in keys(A[target, unknown].offsets) for unknown in inputs(A)])
@@ -48,4 +48,20 @@ function stack_time!(A::BlockJacobian{T}) where {T}
         end
     end
     return A
+end
+
+function reduced_system(A::BlockJacobian{T}, shocks) where {T}
+    stack_time!(A)
+    NT, NU, NZ = length(outputs(A)), length(inputs(A)), length(shocks)
+    ∂U = zeros(T, NT, NU - NZ, 2)
+    ∂Z = zeros(T, NT, NZ, 2)
+    for (o, outvar) in enumerate(outputs(A))
+        for (i, invar) in enumerate(setdiff(inputs(A), shocks))
+            ∂U[o, i, :] = A[outvar, invar][0:1]
+        end
+        for (i, invar) in enumerate(shocks)
+            ∂Z[o, i, :] = A[outvar, invar][0:1]
+        end
+    end
+    return FirstOrderSystem(∂U, ∂Z)
 end
