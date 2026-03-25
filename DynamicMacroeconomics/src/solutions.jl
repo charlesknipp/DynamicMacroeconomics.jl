@@ -45,17 +45,18 @@ Base.@kwdef struct QuadraticIteration
 end
 
 function solve(system::FirstOrderSystem, algo::QuadraticIteration)
-    C, B, A = eachslice(system.∂Z; dims=3)
+    C, B, A = eachslice(system.∂U; dims=3)
     ghx = zero(A)
 
     for _ in 1:(algo.max_iters)
         ghx = -(A * ghx + B) \ C
+        @show maximum(C + B * ghx + A * ghx * ghx)
         if maximum(C + B * ghx + A * ghx * ghx) < algo.tol
             break
         end
     end
 
-    return ghx, (A * ghx + B) \ -system.∂U[:, :, 2]
+    return ghx, (A * ghx + B) \ -system.∂Z[:, :, 2]
 end
 
 function solve(
