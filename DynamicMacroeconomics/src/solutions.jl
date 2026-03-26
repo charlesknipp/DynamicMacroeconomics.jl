@@ -1,4 +1,4 @@
-export solve, QuadraticIteration, SequenceJacobian
+export solve, QuadraticIteration, SequenceJacobian, QZ
 
 using DifferentiationInterface: jacobian
 
@@ -33,7 +33,7 @@ correct choice for running HMC estimation.
 Given a rational expectations model `model`, we solve the first order system like so:
 
 ```julia
-system = FirstOrderSystem(model, statevars, shockvars);
+system = FirstOrderSystem(model, steady_state, states, shocks, targets);
 policy, impact = solve(system, QuadraticIteration());
 ```
 
@@ -50,7 +50,6 @@ function solve(system::FirstOrderSystem, algo::QuadraticIteration)
 
     for _ in 1:(algo.max_iters)
         ghx = -(A * ghx + B) \ C
-        @show maximum(C + B * ghx + A * ghx * ghx)
         if maximum(C + B * ghx + A * ghx * ghx) < algo.tol
             break
         end
@@ -64,6 +63,65 @@ function solve(
 )
     system = FirstOrderSystem(model, ss, states, shocks)
     return solve(system, algo)
+end
+
+"""
+    QZ()
+
+An algorithm reliant on the ordered Schur decomposition of system matrices in recursive form
+which is fully generalized to systems containing one lead and one lag. This is considerably
+faster than linear time iteration, but induces problems with automatic differentiation.
+
+This algorithm takes a first order system of the following form:
+```math
+A x_{t+1} + B x_{t} + C x_{t-1} + D u_{t} = 0
+```
+to solve for the policy function ``P`` such that
+```math
+x_{t} = P x_{t+1} + Q u_{t}
+```
+
+This particular implementation, based on (Auclert et al, 2025), neatly transforms our system
+which solves a matrix quadratic using QZ.
+
+```math
+\begin{bmatrix} I & 0 \\ 0 & A \end{bmatrix} \begin{bmatrix} I \\ P \end{bmatrix} P =
+\begin{bmatrix} 0 & I \\ -C & -B \end{bmatrix} \begin{bmatrix} I \\ P \end{bmatrix}
+```
+
+# Example
+
+Given a rational expectations model `model`, we solve the first order system like so:
+
+```julia
+system = FirstOrderSystem(model, steady_state, states, shocks, targets);
+policy, impact = solve(system, QZ());
+```
+
+See also [`QuadraticIteration`](@ref).
+"""
+struct QZ end
+
+function solve(system::FirstOrderSystem, ::QZ)
+    C, B, A = eachslice(system.∂U, dims=3)
+    n = size(system.∂U, 1)
+
+    F = schur([zero(A) I(n); -C -B], cat(I(n), A, dims=(1, 2)))
+    eigenvalues = F.α ./ F.β
+
+    stable_flag = abs.(eigenvalues) .< 1
+    nstable = count(stable_flag)
+    ordschur!(F, stable_flag)
+
+    Z11 = F.Z[1:nstable, 1:nstable]
+    Z21 = F.Z[nstable+1:end, 1:nstable]
+
+    if rank(Z11) < nstable
+        warn("Invertibility condition violated")
+    end
+
+    P = Z21 * inv(Z11)
+    return P, (A * P + B) \ -system.∂Z[:, :, 2]
 end
 
 ## SEQUENCE SPACE METHODS ##################################################################
@@ -94,7 +152,7 @@ Given a rational expectations model `model`, we solve the first order system in 
 space like so:
 
 ```julia
-system = FirstOrderSystem(model, statevars, shockvars);
+system = FirstOrderSystem(model, steady_state, states, shocks, targets);
 sequence_jacobians = solve(system, SequenceJacobian(150));
 ```
 
@@ -108,10 +166,9 @@ Base.@kwdef struct SequenceJacobian
 end
 
 function solve(system::FirstOrderSystem, algo::SequenceJacobian)
-    HU = convmat(system.∂Z, algo.T)
-    HZ = convmat(system.∂U, algo.T)
+    HU = convmat(system.∂U, algo.T)
+    HZ = convmat(system.∂Z, algo.T)
 
-    # TODO: the reshaping is so beyond untested, but eh it's okay
-    G = reshape(-HU \ HZ, (algo.T, size(system.∂Z, 2), algo.T))
+    G = reshape(-HU \ HZ, (algo.T, size(system.∂U, 2), algo.T))
     return permutedims(G, (2, 1, 3))
 end
