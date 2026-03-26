@@ -39,7 +39,7 @@ shift(::Type{T}, i::Integer) where {T} = ToeplitzSymbol(Dict(i => 1), T[1])
 shift(i::Integer) = shift(Float64, i)
 
 # shift forward the targets with lagged variables so we can cast into the SGU form
-function stack_time!(A::BlockJacobian{T}) where {T}
+function shift_lags!(A::BlockJacobian{T}) where {T}
     for target in outputs(A)
         if any([-1 in keys(A[target, unknown].offsets) for unknown in inputs(A)])
             for unknown in inputs(A)
@@ -50,8 +50,9 @@ function stack_time!(A::BlockJacobian{T}) where {T}
     return A
 end
 
+# while currently unused, it may be useful for speeding up the QZ solver
 function reduced_system(A::BlockJacobian{T}, shocks) where {T}
-    stack_time!(A)
+    shift_lags!(A)
     NT, NU, NZ = length(outputs(A)), length(inputs(A)), length(shocks)
     ∂U = zeros(T, NT, NU - NZ, 2)
     ∂Z = zeros(T, NT, NZ, 2)
