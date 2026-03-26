@@ -63,14 +63,19 @@ ss = solve(
 Now that the model is sufficiently defined, we can obtain the policy function by solving the first order perturbation either by state space or sequence space methods.
 
 ```julia
-A, B = solve(rbc_model, ss, [:K, :C, :Z], [:ε]; order=1, algo=QuadraticIteration())
-GE   = solve(rbc_model, ss, [:K, :C, :Z], [:ε]; order=1, algo=SequenceJacobian(150))
+unknowns = (:K, :C, :Z)
+shocks   = (:ε,)
+targets  = (:euler, :goods_mkt, :shock_res)
+
+solve(rbc_model, ss, unknowns, shocks, targets; order=1, algo=QuadraticIteration())
+solve(rbc_model, ss, unknowns, shocks, targets; order=1, algo=QZ())
+solve(rbc_model, ss, unknowns, shocks, targets; order=1, algo=SequenceJacobian(150))
 ```
 
 We encourage the user to experiment with `SSMProblems.jl` to create a potentially nonlinear measurement, but we include a constructor for linear Gaussian state space models. To demonstrate we can create a state space observing consumption with a measurement noise of 1.0, and simulate 100 time periods.
 
 ```julia
-ssm = StateSpaceModel(..., LinearGaussianControllableDynamics(A, B), ...)
+ssm = StateSpaceModel(..., LinearGaussianControllableDynamics(A2, B2), ...)
 x, y = sample(rng, ssm, 100)
 ```
 
@@ -78,8 +83,7 @@ Using `GeneralizedFilters.jl`, we can extract the loglikelihood with the Kalman 
 
 ## Closing Remarks
 
-- Models only support one lead and one lag as of now.
-- Solving the first order perturbation is not guaranteed to work right now.
+- Models support general offsets, but first order perturbation does not handle it just yet.
 - I plan on removing the `ComponentArrays.jl` dependency since it may have some odd type conversions.
 - Yes, I know the docs are broken and it will get fixed as soon as I can solve models consistently.
 
