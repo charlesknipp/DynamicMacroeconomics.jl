@@ -32,37 +32,16 @@ function FirstOrderSystem(model::CombinedBlock, ss, unknowns, shocks, targets; k
     return FirstOrderSystem(J, shocks)
 end
 
-## SCHMITT GROHE URIBE #####################################################################
+# (unused) allows support for higher order leads and lags in QZ solver
+function qz_helper(system::FirstOrderSystem)
+    A, ∂Us = eachslice(system.∂U, dims=3)
+    n = size(A, 1)
+    m = length(∂Us) - 1
+    Γ0 = [zeros(n * m, n) I(n * m); -hcat(∂Us...)]
+    Γ1 = cat(I(n * m), A, dims=(1, 2))
+    return Γ0, Γ1
+end
 
-# this is probably overkill, but it's efficient enough and reads nicely
+# lag and lead operator as a ToeplitzSymbol
 shift(::Type{T}, i::Integer) where {T} = ToeplitzSymbol(Dict(i => 1), T[1])
 shift(i::Integer) = shift(Float64, i)
-
-# shift forward the targets with lagged variables so we can cast into the SGU form
-function shift_lags!(A::BlockJacobian{T}) where {T}
-    for target in outputs(A)
-        if any([-1 in keys(A[target, unknown].offsets) for unknown in inputs(A)])
-            for unknown in inputs(A)
-                A[target, unknown] = A[target, unknown] * shift(T, 1)
-            end
-        end
-    end
-    return A
-end
-
-# while currently unused, it may be useful for speeding up the QZ solver
-function reduced_system(A::BlockJacobian{T}, shocks) where {T}
-    shift_lags!(A)
-    NT, NU, NZ = length(outputs(A)), length(inputs(A)), length(shocks)
-    ∂U = zeros(T, NT, NU - NZ, 2)
-    ∂Z = zeros(T, NT, NZ, 2)
-    for (o, outvar) in enumerate(outputs(A))
-        for (i, invar) in enumerate(setdiff(inputs(A), shocks))
-            ∂U[o, i, :] = A[outvar, invar][0:1]
-        end
-        for (i, invar) in enumerate(shocks)
-            ∂Z[o, i, :] = A[outvar, invar][0:1]
-        end
-    end
-    return FirstOrderSystem(∂U, ∂Z)
-end
