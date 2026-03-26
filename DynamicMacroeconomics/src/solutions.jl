@@ -3,19 +3,44 @@ export solve, QuadraticIteration, SequenceJacobian, QZ
 using DifferentiationInterface: jacobian
 
 """
-    solve(model, steady_state, states, shocks, order; kwargs...)
+    solve(model, steady_state, unknowns, shocks, targets; order=1, kwargs...)
 
 For a given rational expectations model, solve the k-th order approximation to obtain the
-policy function for Markov representation.
+general equilibrium solution either in state space or sequence space depending on the given
+algorithm.
 
 See also [`state_space`](@ref)..
 """
-function solve(block::AbstractBlock, ss, states, shocks, order::Int=1; kwargs...)
-    return solve(block, ss, states, shocks, Val(order); kwargs...)
+function solve(
+    block::AbstractBlock,
+    ss,
+    unknowns,
+    shocks,
+    targets=outputs(block);
+    order::Int=1,
+    kwargs...
+)
+    return solve(block, ss, unknowns, shocks, targets, Val(order); kwargs...)
 end
 
-function solve(block::AbstractBlock, ss, states, shocks, order; kwargs...)
+# solving to higher orders
+function solve(block::AbstractBlock, ss, unknowns, shocks, targets, order; kwargs...)
     return error("only first order perturbation methods are defined")
+end
+
+# solving to a first order
+function solve(
+    model::AbstractBlock,
+    ss,
+    unknowns,
+    shocks,
+    targets,
+    ::Val{1};
+    algo=QuadraticIteration(),
+    kwargs...
+)
+    system = FirstOrderSystem(model, ss, unknowns, shocks, targets; kwargs...)
+    return solve(system, algo)
 end
 
 ## PERTURBATION METHODS ####################################################################
@@ -56,13 +81,6 @@ function solve(system::FirstOrderSystem, algo::QuadraticIteration)
     end
 
     return ghx, (A * ghx + B) \ -system.∂Z[:, :, 2]
-end
-
-function solve(
-    model::AbstractBlock, ss, states, shocks, ::Val{1}; algo=QuadraticIteration(), kwargs...
-)
-    system = FirstOrderSystem(model, ss, states, shocks)
-    return solve(system, algo)
 end
 
 """
