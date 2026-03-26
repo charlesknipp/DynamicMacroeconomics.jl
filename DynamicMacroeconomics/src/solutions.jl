@@ -99,7 +99,7 @@ to solve for the policy function ``P`` such that
 x_{t} = P x_{t+1} + Q u_{t}
 ```
 
-This particular implementation, based on (Auclert et al, 2025), neatly transforms our system
+This particular implementation, based on (Anderson, 2006), neatly transforms our system
 which solves a matrix quadratic using QZ.
 
 ```math
