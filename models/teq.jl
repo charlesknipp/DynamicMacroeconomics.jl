@@ -15,10 +15,10 @@ end
     return taylor_res
 end
 
-@simple function ar_shocks(ωs, ωd, ωm, εs, εd, εm, ρs, ρd, ρm)
-    sres = ωs - ρs * lag(ωs) - εs
-    dres = ωd - ρd * lag(ωd) - εd
-    mres = ωm - ρm * lag(ωm) - εm
+@simple function ar_shocks(ωs, ωd, ωm, εs, εd, εm, ρs, ρd, ρm, σs, σd, σm)
+    sres = ωs - ρs * lag(ωs) - σs * εs
+    dres = ωd - ρd * lag(ωd) - σd * εd
+    mres = ωm - ρm * lag(ωm) - σm * εm
     return sres, dres, mres
 end
 
