@@ -1,12 +1,12 @@
 using DynamicMacroeconomics
 
-@simple function euler_equation(y, πs, i, ωs, γ)
-    euler_res = y - lead(y) + (1 / γ) * (i - lead(πs)) - ωs
+@simple function euler_equation(y, πs, i, ωd, γ)
+    euler_res = y - lead(y) + (1 / γ) * (i - lead(πs)) - ωd
     return euler_res
 end
 
-@simple function phillips_curve(y, πs, ωd, θ, β, φ, γ)
-    nkpc_res = πs - (β * lead(πs) + (1 - θ) * (1 - θ * β) / θ * (γ + φ) * y - ωd)
+@simple function phillips_curve(y, πs, ωs, θ, β, φ, γ)
+    nkpc_res = πs - (β * lead(πs) + (1 - θ) * (1 - θ * β) / θ * (γ + φ) * y - ωs)
     return nkpc_res
 end
 
@@ -24,40 +24,37 @@ end
 
 ## DEMO ####################################################################################
 
-θ1 = (
-    β = (1 / 1.05),
-    θ  = 0.75,
-    φ  = 1.00,
-    ϕy = 0.10,
-    ϕπ = 1.50,
-    ϕi = 0.90,
-    γ  = 1.00
+θ = (
+    β=0.995,
+    θ=0.75,
+    φ=1.00,
+    ϕy=0.10,
+    ϕπ=1.50,
+    ϕi=0.90,
+    γ=1.00,
+    ρd=0.80,
+    ρs=0.90,
+    ρm=0.20,
+    σd=1.6013,
+    σs=0.9488,
+    σm=0.2290,
 );
 
-# start with one time shocks
-teq_model_1 = model(euler_equation, phillips_curve, taylor, name="teq-1")
-ss1 = solve(
-    teq_model_1,
-    (θ1..., ωm=0, ωs=0, ωd=0),
-    (y=0, πs=0, i=0),
-    (euler_res=0, nkpc_res=0, taylor_res=0)
-)
-
-θ2 = (;
-    θ1...,
-    ρd = 0.80,
-    ρs = 0.90,
-    ρm = 0.20,
-    σd = 1.60,
-    σs = 0.95,
-    σm = 0.25
-);
-
-# add AR(1) shocks
-teq_model_2 = model(euler_equation, phillips_curve, taylor, ar_shocks, name="teq-2")
-ss2 = solve(
-    teq_model_2,
-    (θ2..., εs=0, εd=0, εm=0),
+teq_model = model(euler_equation, phillips_curve, taylor, ar_shocks; name="teq")
+ss = solve(
+    teq_model,
+    (θ..., εs=0, εd=0, εm=0),
     (y=0, πs=0, i=0, ωs=0, ωd=0, ωm=0),
-    (euler_res=0, nkpc_res=0, taylor_res=0, sres=0, dres=0, mres=0)
+    (euler_res=0, nkpc_res=0, taylor_res=0, sres=0, dres=0, mres=0),
 )
+
+𝒥 = jacobian(
+    teq_model,
+    ss,
+    (:y, :πs, :i, :ωs, :ωd, :ωm, :εs, :εd, :εm),
+    (:euler_res, :nkpc_res, :taylor_res, :sres, :dres, :mres),
+)
+
+# get the VAR form as follows:
+sys = FirstOrderSystem(𝒥, (:εs, :εd, :εm))
+A, B = solve(sys, QZ())
