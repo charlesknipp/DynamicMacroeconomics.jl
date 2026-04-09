@@ -23,7 +23,7 @@ end
 end
 
 # make a traditional RBC model and solve its steady state
-rbc_model = model(market_clearing, firms, households, shocks; name="rbc")
+rbc_model = model((market_clearing, firms, households, shocks); name="rbc")
 ss = solve(
     rbc_model,
     (γ=1.00, α=0.30, δ=0.25, β=(1 / 1.05), ρ=0.80, ε=0.00),
@@ -33,7 +33,4 @@ ss = solve(
 
 # the full system Jacobian is accessible using a custom sparse chain rule accumulation
 𝒥 = jacobian(rbc_model, ss, (:C, :K, :Z, :ε), (:euler, :goods_mkt, :shock_res))
-FirstOrderSystem(𝒥, (:ε,))
-
-# alternatively you can obtain the first order system in one line
-FirstOrderSystem(rbc_model, ss, (:C, :K, :Z), (:ε,), (:euler, :goods_mkt, :shock_res))
+A, B = solve(𝒥, (:ε, ), QZ())

@@ -20,7 +20,7 @@ end
 end
 
 # calibrate instead to a target real interest rate
-rbc_model = model(households, firms, market_clearing; name="rbc")
+rbc_model = model((households, firms, market_clearing); name="rbc")
 ss = solve(
     rbc_model,
     (L=1.00, σ=1.00, γ=1.00, δ=0.025, α=0.11),
@@ -30,7 +30,3 @@ ss = solve(
 
 # the full system Jacobian is accessible using a custom sparse chain rule accumulation
 𝒥 = jacobian(rbc_model, ss, (:K, :L, :Z), (:euler, :goods_mkt))
-FirstOrderSystem(𝒥, (:Z,))
-
-# alternatively you can obtain the first order system in one line
-FirstOrderSystem(rbc_model, ss, (:K, :L), (:Z,), (:euler, :goods_mkt))

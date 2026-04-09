@@ -39,8 +39,8 @@ function solve(
     algo=QuadraticIteration(),
     kwargs...
 )
-    system = FirstOrderSystem(model, ss, unknowns, shocks, targets; kwargs...)
-    return solve(system, algo)
+    J = jacobian(model, ss, union(unknowns, shocks), targets; kwargs...)
+    return solve(J, shocks, algo)
 end
 
 ## PERTURBATION METHODS ####################################################################
@@ -58,8 +58,8 @@ correct choice for running HMC estimation.
 Given a rational expectations model `model`, we solve the first order system like so:
 
 ```julia
-system = FirstOrderSystem(model, steady_state, states, shocks, targets);
-policy, impact = solve(system, QuadraticIteration());
+block_jacobian = jacobian(model, steady_state, states, targets);
+policy, impact = solve(block_jacobian, shocks, QuadraticIteration());
 ```
 
 See also [`QZ`](@ref).
@@ -112,19 +112,36 @@ which solves a matrix quadratic using QZ.
 Given a rational expectations model `model`, we solve the first order system like so:
 
 ```julia
-system = FirstOrderSystem(model, steady_state, states, shocks, targets);
-policy, impact = solve(system, QZ());
+block_jacobian = jacobian(model, steady_state, states, targets);
+policy, impact = solve(block_jacobian, shocks, QZ());
 ```
 
 See also [`QuadraticIteration`](@ref).
 """
 struct QZ end
 
-function solve(system::FirstOrderSystem, ::QZ)
-    C, B, A = eachslice(system.∂U, dims=3)
-    n = size(system.∂U, 1)
+# not sure if this is exactly the interface I want, but it works for now
+function LinearAlgebra.schur(A::BlockJacobian)
+    As..., A1 = eachoffset(A)
+    n = size(A1, 1)
+    m = length(As) - 1
+    return schur(
+        [zeros(n * m, n) I(n * m); -hcat(As...)], cat(I(n * m), A1, dims=(1, 2))
+    )
+end
 
-    F = schur([zero(A) I(n); -C -B], cat(I(n), A, dims=(1, 2)))
+# TODO: there is likely a better approach
+function matrix_polynomial(A::BlockJacobian, P::AbstractMatrix)
+    idx = offset_range(A)[2:end]
+    return sum(ntuple(i -> getband(A, idx[i]) * (P ^ (i - 1)), length(idx)))
+end
+
+function solve(A::BlockJacobian, controls, ::QZ)
+    states = symdiff(inputs(A), controls)
+    ∂U = subset(A, :, states)
+    ∂Z = subset(A, :, controls)
+
+    F = schur(∂U)
     eigenvalues = F.α ./ F.β
 
     stable_flag = abs.(eigenvalues) .< 1
@@ -139,7 +156,7 @@ function solve(system::FirstOrderSystem, ::QZ)
     end
 
     P = Z21 * inv(Z11)
-    return P, (A * P + B) \ -system.∂Z[:, :, 2]
+    return P, matrix_polynomial(∂U, P) \ -getband(∂Z, 0)
 end
 
 ## SEQUENCE SPACE METHODS ##################################################################
@@ -170,8 +187,8 @@ Given a rational expectations model `model`, we solve the first order system in 
 space like so:
 
 ```julia
-system = FirstOrderSystem(model, steady_state, states, shocks, targets);
-sequence_jacobians = solve(system, SequenceJacobian(150));
+block_jacobian = jacobian(model, steady_state, states, targets);
+sequence_jacobians = solve(block_jacobian, shocks, SequenceJacobian(150));
 ```
 
 The output `sequence_jacobians` is a num_states × T × T array, which represents the model's
@@ -183,10 +200,11 @@ Base.@kwdef struct SequenceJacobian
     T::Int = 300
 end
 
+# TODO: this needs some more love
 function solve(system::FirstOrderSystem, algo::SequenceJacobian)
     HU = convmat(system.∂U, algo.T)
     HZ = convmat(system.∂Z, algo.T)
 
-    G = reshape(-HU \ HZ, (algo.T, size(system.∂U, 2), algo.T))
-    return permutedims(G, (2, 1, 3))
+    # return a block Jacobian or something along those lines
+    return -HU \ HZ
 end

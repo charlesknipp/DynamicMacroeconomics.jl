@@ -176,12 +176,37 @@ function Base.merge(A::BlockJacobian{AT}, B::BlockJacobian{BT}) where {AT,BT}
 end
 
 # TODO: please get rid of this extraneous allocation
-function subset(A::BlockJacobian{T}, targets) where {T}
-    B = BlockJacobian(T, inputs(A), targets)
-    for o in targets, i in inputs(A)
+function subset(A::BlockJacobian{T}, outputs, inputs) where {T}
+    B = BlockJacobian(T, inputs, outputs)
+    for o in outputs, i in inputs
         B[o, i] = A[o, i]
     end
     return B
+end
+
+subset(A::BlockJacobian, ::Colon, inputs) = subset(A, outputs(A), inputs)
+subset(A::BlockJacobian, outputs, ::Colon) = subset(A, outputs, inputs(A))
+
+matreduce(f, A::AbstractMatrix) = mapreduce(f, (x...) -> f(x), A)
+function offset_range(A::BlockJacobian)
+    offsetmat = keys.(getproperty.(A.partials, :offsets))
+    max_lag  = matreduce(x -> minimum(x; init=typemax(Int64)), offsetmat)
+    max_lead = matreduce(x -> maximum(x; init=typemin(Int64)), offsetmat)
+    return max_lag:max_lead
+end
+
+function getband(A::BlockJacobian{T}, i::Integer) where {T}
+    outvars, invars = outputs(A), inputs(A)
+    ∂s = zeros(T, length(outvars), length(invars))
+    for (j, outvar) in enumerate(outvars), (k, invar) in enumerate(invars)
+        ∂s[j, k] = A[outvar, invar][i]
+    end
+    return ∂s
+end
+
+function eachoffset(A::BlockJacobian)
+    idx = offset_range(A)
+    return ntuple(i -> getband(A, idx[i]), length(idx))
 end
 
 ## DIFFERENTIATION INTERFACE ###############################################################
@@ -192,32 +217,41 @@ end
 
 # idk if fill is appropriate here, so I use a list comprehension instead
 vectorize(val::Real, offsets) = [val for _ in eachindex(offsets)]
+offset_vectorize(val::Real, offsets) = offset_component(vectorize(val, offsets), offsets)
 
 function make_jacobian_arguments(block::AbstractBlock, ss::NamedTuple, unknowns)
+    C = ss[setdiff(inputs(block), unknowns)]
+    X = NamedTuple{unknowns}(
+        [offset_vectorize(ss[i], block.sparsity[i]) for i in unknowns]
+    )
+    return X, C
+end
+
+function _jacobian_arguments(block::AbstractBlock, ss::NamedTuple, unknowns)
     C = ss[setdiff(inputs(block), unknowns)]
     X = NamedTuple{unknowns}([vectorize(ss[i], block.sparsity[i]) for i in unknowns])
     return X, C
 end
 
 function make_jacobian_arguments(block::AbstractBlock, ss::ComponentVector, unknowns)
-    X, C = make_jacobian_arguments(block, (; ss...), unknowns)
+    X, C = _jacobian_arguments(block, (; ss...), unknowns)
     return ComponentVector(; X...), ComponentVector(; C...)
 end
 
 function DifferentiationInterface.jacobian(
     block::SimpleBlock, ss, unknowns, targets; backend=AutoForwardDiff()
 )
-    targets = tuple(intersect(targets, outputs(block))...)
+    target_idx = map(y -> findfirst(x -> x == y, outputs(block)), targets)
     X, C = make_jacobian_arguments(block, ss, unknowns)
     M = DifferentiationInterface.jacobian(
-        (x, c) -> block(x, c)[targets], backend, X, Constant(C)
-    )
+        (x, c) -> block(x, c), backend, X, Constant(C)
+    )[collect(target_idx), :]
     return BlockJacobian(M, unknowns, targets, block.sparsity)
 end
 
 function DifferentiationInterface.jacobian(
-    blocks::CombinedBlock{F,NU,NO}, ss, unknowns, targets; backend=AutoForwardDiff()
-) where {F,NU,NO}
+    blocks::CombinedBlock, ss, unknowns, targets; backend=AutoForwardDiff()
+)
     all_outputs = outputs(blocks)
     total_jacobian = BlockJacobian(eltype(ss), unknowns)
     for block in blocks
@@ -225,5 +259,5 @@ function DifferentiationInterface.jacobian(
         block_jacobian = jacobian(block, ss, intermediates, outputs(block); backend)
         total_jacobian = merge(total_jacobian, block_jacobian * total_jacobian)
     end
-    return subset(total_jacobian, targets)
+    return subset(total_jacobian, targets, :)
 end

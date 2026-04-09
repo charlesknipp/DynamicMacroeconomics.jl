@@ -103,7 +103,7 @@ end
 );
 
 # define the model equations and solve for the steady state
-teq_model = model(euler_equation, phillips_curve, taylor, ar_shocks; name="teq")
+teq_model = model((euler_equation, phillips_curve, taylor, ar_shocks); name="teq")
 ss = solve(
     teq_model,
     (θ..., εs=0, εd=0, εm=0),
@@ -135,7 +135,7 @@ ssm = StateSpaceForm(
 
 # we can test out the impulse responses and covariance functions like so:
 M = impulse_response(ssm, 300)
-Σ = spectral_covariance(M1)
+Σ = spectral_covariance(M)
 
 # for structural identification, compute the R^2 weights
 identification_weights(ssm, 100)
