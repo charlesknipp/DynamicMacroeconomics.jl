@@ -20,7 +20,7 @@ end
 end
 
 # calibrate instead to a target real interest rate
-rbc_model = model((households, firms, market_clearing); name="rbc")
+rbc_model = model(households, firms, market_clearing; name="rbc")
 ss = solve(
     rbc_model,
     (L=1.00, σ=1.00, γ=1.00, δ=0.025, α=0.11),

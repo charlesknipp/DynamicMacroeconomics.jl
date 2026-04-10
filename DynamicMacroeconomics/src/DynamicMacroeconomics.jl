@@ -24,7 +24,7 @@ using OffsetArrays
 using DataStructures
 
 export model, @simple, lead, lag, jacobian
-export SimpleBlock, CombinedBlock
+export SimpleBlock, CombinedBlock, ComposedBlock
 export inputs, outputs
 
 # for steady state evaluations
@@ -44,6 +44,17 @@ end
 function inputs(::AbstractBlock) end
 function outputs(::AbstractBlock) end
 
+"""
+    SimpleBlock{FT,SP}
+
+A standard equation block which captures targets in the return statement and state variables
+in the function arguments. To keep things as general as possible, function parameters are
+initially treated as states. This allows us to calibrate parameters given a target output.
+
+Model equations are subsumed into the functor attribute of each simple block, which are a
+heavily modified version of the user specified code. Although, the macro will preserve any
+LineNumberNodes, so any relevant stack traces will point back to the users original code.
+"""
 struct SimpleBlock{FT,SP} <: AbstractBlock
     functor::FT
     inputs::OrderedSet{Symbol}
@@ -175,46 +186,45 @@ end
 # when taking partials given a constant (not type stable)
 (block::SimpleBlock)(x::ComponentArray, c::ComponentArray) = block([x; c])
 
-struct CombinedBlock{BS<:Tuple} <: AbstractBlock
-    dag::SimpleDiGraph
-    blocks::BS
+"""
+    ComposedBlock{PT,CT}
+
+A recursively defined block usually constructed by way of a topological sort. Each composed
+block contains a parent block and a child block (the child is either a recursive block or a
+root node).
+
+This improvement to the combined block that behaves sort of like a linked list, but with
+parametric types to enforce stability through a recursive evaluation.
+
+To compose blocks, you should never have to call the constructor on its own, instead useres
+are directed to either the `compose` or `model` functions.
+"""
+struct ComposedBlock{PT,CT} <: AbstractBlock
+    parent::PT
+    child::CT
     inputs::OrderedSet{Symbol}
     outputs::OrderedSet{Symbol}
     name::String
-    order::Vector{Int64}
 end
 
-Base.length(model::CombinedBlock) = length(model.blocks)
-Base.@propagate_inbounds function Base.getindex(model::CombinedBlock, i)
-    return model.blocks[model.order[i]]
+function compose(parent::AbstractBlock, child::AbstractBlock, name::String="block")
+    invars = union(inputs(parent), inputs(child))
+    outvars = OrderedSet{Symbol}(union(outputs(parent), outputs(child)))
+    return ComposedBlock(
+        parent, child, OrderedSet{Symbol}(setdiff(invars, outvars)), outvars, name
+    )
 end
 
-# enforces the correct top sort when iterating through blocks
-function Base.iterate(model::CombinedBlock, state=1)
-    out = iterate(model.order, state)
-    if !isnothing(out)
-        idx, state = out
-        return model.blocks[idx], state
-    end
-    return out
+inputs(block::ComposedBlock) = collect(block.inputs)
+outputs(block::ComposedBlock) = collect(block.outputs)
+
+# so far this is only used within the steady state residual computation
+function (block::ComposedBlock)(x)
+    y = merge(x, block.child(x))
+    return merge(y, block.parent(y))
 end
 
-# this is clearly not type stable...
-function recurse_blocks(model::CombinedBlock, x, iter::Integer=1)
-    if length(model) < iter
-        return x
-    else
-        return recurse_blocks(model, merge(x, model[iter](x)), iter + 1)
-    end
-end
-
-(model::CombinedBlock)(x::Union{<:ComponentVector,<:NamedTuple}) = recurse_blocks(model, x)
-
-inputs(block::CombinedBlock) = collect(block.inputs)
-outputs(block::CombinedBlock) = collect(block.outputs)
-
-# take blocks and construct a digraph
-function model(blocks; name::String="block")
+function construct_graph(blocks)
     dag = SimpleDiGraph(length(blocks))
     for n in 1:length(blocks)
         for output in outputs(blocks[n])
@@ -222,21 +232,18 @@ function model(blocks; name::String="block")
             add_edge!.(Ref(dag), n, m)
         end
     end
-    invars, outvars = union(inputs.(blocks)...), union(outputs.(blocks)...)
-    order = topological_sort(dag)
-    return CombinedBlock(
-        dag,
-        blocks,
-        OrderedSet{Symbol}(setdiff(invars, outvars)),
-        OrderedSet{Symbol}(outvars),
-        name,
-        order
-    )
+    return dag
+end
+
+# while not type stable, it will almost never be a bottleneck
+function model(blocks...; name::String="block")
+    dag = construct_graph(blocks)
+    return mapreduce(i -> blocks[i], (x, y) -> compose(y, x), topological_sort(dag))
 end
 
 include("jacobians.jl")
 include("steady_state.jl")
-include("systems.jl")
+# include("systems.jl")
 include("misc.jl")
 include("solutions.jl")
 # include("state_space.jl")

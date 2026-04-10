@@ -1,4 +1,4 @@
-export solve
+export solve_steady_state
 
 # for combining component arrays
 Base.merge(x::ComponentVector, y::ComponentVector) = ComponentVector(; x..., y...)
@@ -9,24 +9,31 @@ function steady_state(block::AbstractBlock, x, θ)
     return merge(variables, block(variables))
 end
 
-function compute_residuals(
-    block::AbstractBlock,
-    calibration::ComponentArray,
-    unknowns::ComponentArray,
-    targets::ComponentArray,
-)
+# for subtracting named tuples with shared name spaces
+subtract(A::ComponentArray, B::ComponentArray) = A - B
+function subtract(A::NamedTuple{Names}, B::NamedTuple{Names}) where {Names}
+    return NamedTuple{Names}(values(A) .- values(B))
+end
+
+function compute_residuals(block::AbstractBlock, unknowns, calibration, targets)
     outputs = block(merge(unknowns, calibration))
-    return outputs[keys(targets)] - targets
+    return collect(subtract(outputs[keys(targets)], targets))
 end
 
 """
-    solve(model, initial_guess, calibration[, algorithm])
+    solve_steady_state(model, initial_guess, calibration, targets[, algorithm])
 
 Solve for the steady state of a given graphical model given a calibration and initial guess,
 uisng an optionally specified algorithm ala NonlinearSolve.jl (defaults to NewtonRaphson
-with ForwardDiff)
+with ForwardDiff).
+
+Users can get creative and solve for steady states that target certain model outputs; even
+when said output is not targetted in the general equilibrium solution.
+
+For details, see the example script [`rbc_2.jl`](@ref) which calibrates the model to find a
+target rental rate of capital.
 """
-function solve(
+function solve_steady_state(
     block::AbstractBlock,
     calibration::ComponentArray,
     unknowns::ComponentArray,
@@ -49,14 +56,14 @@ function solve(
     end
 end
 
-function solve(
+function solve_steady_state(
     block::AbstractBlock,
     calibration::NamedTuple,
     unknowns::NamedTuple,
     targets::NamedTuple;
     kwargs...,
 )
-    return solve(
+    return solve_steady_state(
         block,
         ComponentArray(calibration),
         ComponentArray(unknowns),

@@ -69,18 +69,24 @@ Base.@kwdef struct QuadraticIteration
     max_iters::Int = 2^10
 end
 
-function solve(system::FirstOrderSystem, algo::QuadraticIteration)
-    C, B, A = eachslice(system.∂U; dims=3)
-    ghx = zero(A)
+function solve(A::BlockJacobian, controls, algo::QuadraticIteration)
+    states = symdiff(inputs(A), controls)
+    ∂U = subset(A, :, states)
+    ∂Z = subset(A, :, controls)
+
+    ∂U1 = firstband(∂U)
+    P = zero(∂U1)
+    system = matrix_polynomial(∂U, P)
 
     for _ in 1:(algo.max_iters)
-        ghx = -(A * ghx + B) \ C
-        if maximum(C + B * ghx + A * ghx * ghx) < algo.tol
+        P = -system \ ∂U1
+        system = matrix_polynomial(∂U, P)
+        if maximum(∂U1 + system * P) < algo.tol
             break
         end
     end
 
-    return ghx, (A * ghx + B) \ -system.∂Z[:, :, 2]
+    return P, system \ -getband(∂Z, 0)
 end
 
 """
@@ -161,20 +167,6 @@ end
 
 ## SEQUENCE SPACE METHODS ##################################################################
 
-function convmat(basis::AbstractVector{T}, N) where {T<:Real}
-    padding = zeros(T, N ≥ 3 ? N - 2 : 0)
-    return Toeplitz([basis[2:-1:1]; padding], [basis[2:end]; padding])
-end
-
-function convmat(basis::AbstractArray{T,3}, N) where {T<:Real}
-    nx, ny, _ = size(basis)
-    M = zeros(T, nx * N, ny * N)
-    for i in 1:nx, j in 1:ny
-        M[(N * (i - 1) + 1):(N * i), (N * (j - 1) + 1):(N * j)] = convmat(basis[i, j, :], N)
-    end
-    return M
-end
-
 """
     SequenceJacobian
 
@@ -200,11 +192,14 @@ Base.@kwdef struct SequenceJacobian
     T::Int = 300
 end
 
-# TODO: this needs some more love
-function solve(system::FirstOrderSystem, algo::SequenceJacobian)
-    HU = convmat(system.∂U, algo.T)
-    HZ = convmat(system.∂Z, algo.T)
+function sequence_jacobian(A::BlockJacobian, T::Integer)
+    # this is rather disgusting, but it works for the time being
+    return vcat(hcat.(eachcol(Toeplitz.(A.partials, T))...)...)
+end
 
-    # return a block Jacobian or something along those lines
-    return -HU \ HZ
+function solve(A::BlockJacobian, controls, algo::SequenceJacobian)
+    states = symdiff(inputs(A), controls)
+    ∂U = subset(A, :, states)
+    ∂Z = subset(A, :, controls)
+    return -sequence_jacobian(∂U, algo.T) \ sequence_jacobian(∂Z, algo.T)
 end

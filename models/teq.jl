@@ -103,7 +103,7 @@ end
 );
 
 # define the model equations and solve for the steady state
-teq_model = model((euler_equation, phillips_curve, taylor, ar_shocks); name="teq")
+teq_model = model(euler_equation, phillips_curve, taylor, ar_shocks; name="teq")
 ss = solve(
     teq_model,
     (θ..., εs=0, εd=0, εm=0),

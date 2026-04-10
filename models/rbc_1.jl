@@ -23,8 +23,8 @@ end
 end
 
 # make a traditional RBC model and solve its steady state
-rbc_model = model((market_clearing, firms, households, shocks); name="rbc")
-ss = solve(
+rbc_model = model(market_clearing, firms, households, shocks; name="rbc")
+ss = solve_steady_state(
     rbc_model,
     (γ=1.00, α=0.30, δ=0.25, β=(1 / 1.05), ρ=0.80, ε=0.00),
     (C=1.00, K=0.40, Z=0.40),

@@ -204,12 +204,18 @@ function getband(A::BlockJacobian{T}, i::Integer) where {T}
     return ∂s
 end
 
+function firstband(A::BlockJacobian)
+    offsetmat = keys.(getproperty.(A.partials, :offsets))
+    max_lag = matreduce(x -> minimum(x; init=typemax(Int64)), offsetmat)
+    return getband(A, max_lag)
+end
+
 function eachoffset(A::BlockJacobian)
     idx = offset_range(A)
     return ntuple(i -> getband(A, idx[i]), length(idx))
 end
 
-## DIFFERENTIATION INTERFACE ###############################################################
+## SIMPLE BLOCK AUTOMATIC DIFFERENTIATION ##################################################
 
 function DifferentiationInterface.jacobian(block::AbstractBlock, ss, unknowns; kwargs...)
     return jacobian(block, ss, unknowns, outputs(block); kwargs...)
@@ -249,15 +255,37 @@ function DifferentiationInterface.jacobian(
     return BlockJacobian(M, unknowns, targets, block.sparsity)
 end
 
+## COMPOSED BLOCK AUTOMATIC DIFFERENTIATION ################################################
+
 function DifferentiationInterface.jacobian(
-    blocks::CombinedBlock, ss, unknowns, targets; backend=AutoForwardDiff()
+    blocks::ComposedBlock, ss, unknowns, targets; backend=AutoForwardDiff()
 )
-    all_outputs = outputs(blocks)
-    total_jacobian = BlockJacobian(eltype(ss), unknowns)
-    for block in blocks
-        intermediates = tuple((unknowns ∩ inputs(block)) ∪ (all_outputs ∩ inputs(block))...)
-        block_jacobian = jacobian(block, ss, intermediates, outputs(block); backend)
-        total_jacobian = merge(total_jacobian, block_jacobian * total_jacobian)
-    end
+    identity_jacobian = BlockJacobian(eltype(ss), unknowns)
+    total_jacobian = accumulate_jacobian(identity_jacobian, blocks, ss, unknowns; backend)
     return subset(total_jacobian, targets, :)
+end
+
+# forward mode accumulation for simple blocks
+function accumulate_jacobian(
+   total_jacobian::BlockJacobian, block::SimpleBlock, ss, unknowns; kwargs...
+)
+    # this mimics the original implementation using combined blocks
+    block_jacobian = jacobian(block, ss, unknowns, outputs(block); kwargs...)
+    return merge(total_jacobian, block_jacobian * total_jacobian)
+end
+
+# forward mode accumulation for composed blocks
+function accumulate_jacobian(
+    total_jacobian::BlockJacobian, block::ComposedBlock, ss, unknowns; kwargs...
+)
+    # recurse through the children until we reach the root, then return the merged jacobian
+    accumulated_jacobian = accumulate_jacobian(
+        total_jacobian, block.child, ss, Tuple(unknowns ∩ inputs(block.child)); kwargs...
+    )
+
+    # compute the parent block jacobian to forward accumulate intermediate states
+    intermediates = (unknowns ∪ outputs(block.child)) ∩ inputs(block.parent)
+    return accumulate_jacobian(
+        accumulated_jacobian, block.parent, ss, Tuple(intermediates); kwargs...
+    )
 end
