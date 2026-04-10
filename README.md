@@ -52,7 +52,7 @@ Steady states are calculated internally, using `NonlinearSolve.jl` as a backend 
 
 ```julia
 rbc_model = model(market_clearing, firms, households, shocks; name="rbc")
-ss = solve(
+ss = solve_steady_state(
     rbc_model,
     (γ=1.00, α=0.30, δ=0.25, β=(1 / 1.05), ρ=0.80, ε=0.00),
     (C=1.00, K=0.40, Z=0.40),
@@ -75,11 +75,12 @@ solve(rbc_model, ss, unknowns, shocks, targets; order=1, algo=SequenceJacobian(1
 We encourage the user to experiment with `SSMProblems.jl` to create a potentially nonlinear measurement, but we include a constructor for linear Gaussian state space models. To demonstrate we can create a state space observing consumption with a measurement noise of 1.0, and simulate 100 time periods.
 
 ```julia
-ssm = StateSpaceModel(..., LinearGaussianControllableDynamics(A2, B2), ...)
+A, B = solve(rbc_model, ss, unknowns, shocks, targets; order=1, algo=QZ())
+ssm = StateSpaceModel(..., LinearGaussianControllableDynamics(A, B), ...)
 x, y = sample(rng, ssm, 100)
 ```
 
-Using `GeneralizedFilters.jl`, we can extract the loglikelihood with the Kalman filter. This is used in `models/rbc.jl` for estimation. More details can be provided in that script.
+Using `GeneralizedFilters.jl`, we can extract the loglikelihood with the Kalman filter. This is used in `models/rbc.jl` for estimation. More details can be provided in that script (lol sike not really, although this will be soon reestablished).
 
 ## Closing Remarks
 
