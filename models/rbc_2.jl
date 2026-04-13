@@ -100,4 +100,3 @@ end
 
 # the following difference should be relatively close to zero
 sum(irfs[1, :] .- G[:K, :Z][:, 1]) < 1e-10
-irfs[1, :]
