@@ -137,8 +137,9 @@ Essentially, you take the optimality conditions $F(Z_{t},K_{t},C_{t})$ and let $
 With the steady state calculation defined, we have enough to materialize the RBC model with exogenous shock $\varepsilon$.
 
 ```@example rbc
-rbc_model = solve(
-    model(households, firms, shocks),
+rbc_model = model(households, firms, shocks; name="rbc")
+ss = solve_steady_state(
+    rbc_model,
     (C=1.00, K=1.00, Z=1.00),
     (γ=1.00, α=0.30, δ=0.25, β=(1/1.05), ρ=0.80, ε=0.00)
 );
@@ -156,7 +157,7 @@ using CairoMakie
 
 # continuous time realization of the RBC model with productivity fixed at steady-state
 function rbc_dynamics(k, c)
-    (; α, β, γ, δ, Z) = rbc_model.steady_state
+    (; α, β, γ, δ, Z) = ss
     ρ = (inv(β) - 1)
     return Point(
         (Z * k ^ α - c) - δ * k,
@@ -165,7 +166,7 @@ function rbc_dynamics(k, c)
 end
 
 ss = rbc_model.steady_state
-klim, clim = 2*ss[:K], 2*ss[:C] 
+klim, clim = 2 * ss[:K], 2 * ss[:C] 
 
 fig = Figure()
 ax = Axis(fig[1,1], title="RBC phase plot", limits=((0.1, klim), (0.1, clim)))
@@ -204,6 +205,7 @@ This yields matrices $P$ and $Q$ which defines the state transition for a first 
 
 Using `DynamicMacroeconomics`, we can obtain these matrices and construct a `SSMProblems` compatible state space (as a vector autoregression) like so:
 ```@example rbc
-P, Q = solve(rbc_model, [:K, :C, :Z], [:ε]; order=1, algo=QuadraticIteration())
-VAR  = LinearGaussianControllableDynamics(P, Q)
+𝒥 = jacobian(rbc_model, ss, (:C, :K, :Z, :ε), (:euler, :goods_mkt, :shock_res))
+A, B = solve(𝒥, (:ε, ), QZ())
+# VAR  = LinearGaussianControllableDynamics(P, Q)
 ```
