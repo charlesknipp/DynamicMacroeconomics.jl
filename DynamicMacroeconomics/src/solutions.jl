@@ -197,9 +197,22 @@ function sequence_jacobian(A::BlockJacobian, T::Integer)
     return vcat(hcat.(eachcol(Toeplitz.(A.partials, T))...)...)
 end
 
+function make_axis(varnames, T::Integer)
+    # this is just for organizing into an symbol indexible collection
+    return Axis(
+        (; (var => ((i - 1) * T + 1):(i  * T) for (i, var) in enumerate(varnames))...)
+    )
+end
+
 function solve(A::BlockJacobian, controls, algo::SequenceJacobian)
     states = symdiff(inputs(A), controls)
     ∂U = subset(A, :, states)
     ∂Z = subset(A, :, controls)
-    return -sequence_jacobian(∂U, algo.T) \ sequence_jacobian(∂Z, algo.T)
+
+    # cast into a component matrix for now, but this is likely subject to change
+    return ComponentMatrix(
+        -sequence_jacobian(∂U, algo.T) \ sequence_jacobian(∂Z, algo.T),
+        make_axis(states, algo.T),
+        make_axis(controls, algo.T)
+    )
 end
