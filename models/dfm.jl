@@ -106,6 +106,8 @@ function factor_matrix(λs::AbstractVector{T}, ny::Int, nx::Int) where {T}
     return Λ
 end
 
+factor_matrix(true_λs, 10, 10)
+
 num_factors(ny::Int, nx::Int) = ny * nx - sum(1:nx)
 
 @model function dynamic_factor_model(ny::Int, nx::Int)
@@ -166,4 +168,9 @@ function read_chain(dx, model)
 end
 
 chain_1 = read_chain(10, "direct_iteration");
+CSV.write("di_quantiles.csv", quantile(group(chain_1, :λs), q=[0.025, 0.25, 0.5, 0.75, 0.975]));
+CSV.write("di_sumstats.csv", summarystats(group(chain_1, :λs)));
+
 chain_2 = read_chain(10, "marginalization");
+CSV.write("kf_quantiles.csv", quantile(group(chain_2, :λs), q=[0.025, 0.25, 0.5, 0.75, 0.975]));
+CSV.write("kf_sumstats.csv", summarystats(group(chain_2, :λs)));
