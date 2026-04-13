@@ -205,7 +205,7 @@ This yields matrices $P$ and $Q$ which defines the state transition for a first 
 
 Using `DynamicMacroeconomics`, we can obtain these matrices and construct a `SSMProblems` compatible state space (as a vector autoregression) like so:
 ```@example rbc
-𝒥 = jacobian(rbc_model, ss, (:C, :K, :Z, :ε), (:euler, :goods_mkt, :shock_res))
+𝒥 = jacobian(rbc_model, ss, (:C, :K, :Z, :ε), (:euler, :walras, :shock_res))
 A, B = solve(𝒥, (:ε, ), QZ())
 # VAR  = LinearGaussianControllableDynamics(P, Q)
 ```
