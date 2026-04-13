@@ -1,5 +1,5 @@
 export ToeplitzSymbol, BlockJacobian, AbstractJacobian
-export test_jacobian
+export getband, subset
 
 import Base: *, +
 
@@ -190,7 +190,7 @@ subset(A::BlockJacobian, outputs, ::Colon) = subset(A, outputs, inputs(A))
 matreduce(f, A::AbstractMatrix) = mapreduce(f, (x...) -> f(x), A)
 function offset_range(A::BlockJacobian)
     offsetmat = keys.(getproperty.(A.partials, :offsets))
-    max_lag  = matreduce(x -> minimum(x; init=typemax(Int64)), offsetmat)
+    max_lag = matreduce(x -> minimum(x; init=typemax(Int64)), offsetmat)
     max_lead = matreduce(x -> maximum(x; init=typemin(Int64)), offsetmat)
     return max_lag:max_lead
 end
@@ -227,9 +227,7 @@ offset_vectorize(val::Real, offsets) = offset_component(vectorize(val, offsets),
 
 function make_jacobian_arguments(block::AbstractBlock, ss::NamedTuple, unknowns)
     C = ss[setdiff(inputs(block), unknowns)]
-    X = NamedTuple{unknowns}(
-        [offset_vectorize(ss[i], block.sparsity[i]) for i in unknowns]
-    )
+    X = NamedTuple{unknowns}([offset_vectorize(ss[i], block.sparsity[i]) for i in unknowns])
     return X, C
 end
 
@@ -249,9 +247,9 @@ function DifferentiationInterface.jacobian(
 )
     target_idx = map(y -> findfirst(x -> x == y, outputs(block)), targets)
     X, C = make_jacobian_arguments(block, ss, unknowns)
-    M = DifferentiationInterface.jacobian(
-        (x, c) -> block(x, c), backend, X, Constant(C)
-    )[collect(target_idx), :]
+    M = DifferentiationInterface.jacobian((x, c) -> block(x, c), backend, X, Constant(C))[
+        collect(target_idx), :,
+    ]
     return BlockJacobian(M, unknowns, targets, block.sparsity)
 end
 
@@ -267,7 +265,7 @@ end
 
 # forward mode accumulation for simple blocks
 function accumulate_jacobian(
-   total_jacobian::BlockJacobian, block::SimpleBlock, ss, unknowns; kwargs...
+    total_jacobian::BlockJacobian, block::SimpleBlock, ss, unknowns; kwargs...
 )
     # this mimics the original implementation using combined blocks
     block_jacobian = jacobian(block, ss, unknowns, outputs(block); kwargs...)

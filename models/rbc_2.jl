@@ -33,18 +33,15 @@ function state_space_form(A::BlockJacobian, controls)
     P, _ = solve(A, controls, QZ())
 
     states = symdiff(inputs(A), controls)
-    ∂U = DynamicMacroeconomics.subset(A, :, states)
-    ∂Z = DynamicMacroeconomics.subset(A, :, controls)
+    ∂U = subset(A, :, states)
+    ∂Z = subset(A, :, controls)
 
-    sys = DynamicMacroeconomics.matrix_polynomial(∂U, P)
-    ∂U1 = DynamicMacroeconomics.getband(∂U, 1)
-
-    Q = BlockJacobian(eltype(sys), controls, states)
+    Q = BlockJacobian(eltype(P), controls, states)
     P = make_policy(P, states, -1)
 
-    Q2 = sys \ -DynamicMacroeconomics.getband(∂Z, 0)
-    make_policy!(Q, Q2, 0)
-    make_policy!(Q, sys \ -(∂U1 * Q2 + DynamicMacroeconomics.getband(∂Z, 1)), 1)
+    system = DynamicMacroeconomics.matrix_polynomial(∂U, getband(P, -1))
+    make_policy!(Q, system \ -getband(∂Z, 0), 0)
+    make_policy!(Q, system \ -(getband(∂U, 1) * getband(Q, 0) + getband(∂Z, 1)), 1)
 
     return P, Q
 end
