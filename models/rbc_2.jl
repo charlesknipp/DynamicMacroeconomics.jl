@@ -8,7 +8,7 @@ function plot_responses(A::Matrix, space::Integer=10; maxval::Integer=50)
     fig = Figure()
     ax = Axis(fig[1, 1]; limits=((0, maxval), nothing))
     for i in space:space:(maxval + 1)
-        lines!(ax, 1:maxval, A[1:maxval, i]; color=(i / maxval), colorrange=0:1)
+        lines!(ax, 0:maxval, A[1:(maxval + 1), i]; color=(i / maxval), colorrange=0:1)
     end
     return fig
 end
@@ -100,3 +100,4 @@ end
 
 # the following difference should be relatively close to zero
 sum(irfs[1, :] .- G[:K, :Z][:, 1]) < 1e-10
+irfs[1, :]
