@@ -140,8 +140,9 @@ With the steady state calculation defined, we have enough to materialize the RBC
 rbc_model = model(households, firms, shocks; name="rbc")
 ss = solve_steady_state(
     rbc_model,
+    (γ=1.00, α=0.30, δ=0.25, β=(1/1.05), ρ=0.80, ε=0.00),
     (C=1.00, K=1.00, Z=1.00),
-    (γ=1.00, α=0.30, δ=0.25, β=(1/1.05), ρ=0.80, ε=0.00)
+    (euler=0.00, walras=0.00, shock_res=0.00),
 );
 nothing # hide
 ```
