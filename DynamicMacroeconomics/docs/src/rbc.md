@@ -166,7 +166,6 @@ function rbc_dynamics(k, c)
     )
 end
 
-ss = rbc_model.steady_state
 klim, clim = 2 * ss[:K], 2 * ss[:C] 
 
 fig = Figure()
