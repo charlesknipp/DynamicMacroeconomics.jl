@@ -19,13 +19,13 @@ Base.size(ssm::StateSpaceForm, n::Integer) = size(ssm)[n]
 function innovations_form(ssm::StateSpaceForm)
     Q, R = ssm.B * ssm.B', ssm.D * ssm.D'
     riccati, _, _ = ared(ssm.A', ssm.C', R, Q, ssm.B * ssm.D')
-    K = (A * riccati * C' + B * D') * inv(C * riccati * C' + R)
-    Σ = C * riccati * C' + R
+    K = (ssm.A * riccati * ssm.C' + ssm.B * ssm.D') * inv(ssm.C * riccati * ssm.C' + R)
+    Σ = ssm.C * riccati * ssm.C' + R
     return K, Σ
 end
 
-function innovations_form(ssm::StateSpaceForm)
-    K, Σ = innovation_cov(ssm)
+function whiten(ssm::StateSpaceForm)
+    K, Σ = innovations_form(ssm)
     return StateSpaceForm(
         [ssm.A zero(ssm.A); (K * ssm.C) (ssm.A - K * ssm.C)],
         [ssm.B; K * ssm.D],
@@ -104,7 +104,7 @@ end
 
 # define the model equations and solve for the steady state
 teq_model = model(euler_equation, phillips_curve, taylor, ar_shocks; name="teq")
-ss = solve(
+ss = solve_steady_state(
     teq_model,
     (θ..., εs=0, εd=0, εm=0),
     (y=0, πs=0, i=0, ωs=0, ωd=0, ωm=0),
@@ -120,8 +120,8 @@ ss = solve(
 )
 
 # solve for the policy function to the first order
-sys = FirstOrderSystem(𝒥, (:εs, :εd, :εm))
-P, Q = solve(sys, QZ())
+# sys = FirstOrderSystem(𝒥, (:εs, :εd, :εm))
+P, Q = solve(𝒥, (:εs, :εd, :εm), QZ())
 
 # permute the dimensions to match Dynare
 p = [4, 2, 5, 6, 3, 1]
