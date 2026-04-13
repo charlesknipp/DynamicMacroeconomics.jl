@@ -1,15 +1,51 @@
 using DynamicMacroeconomics
 using CairoMakie
+using ToeplitzMatrices
 
 ## PLOTTING FUNCTIONS ######################################################################
 
 function plot_responses(A::Matrix, space::Integer=10; maxval::Integer=50)
     fig = Figure()
     ax = Axis(fig[1, 1], limits = ((0, maxval), nothing))
-    for i in 1:space:(maxval+1)
+    for i in space:space:(maxval+1)
         lines!(ax, 1:maxval, A[1:maxval, i], color=(i / maxval), colorrange=0:1)
     end
     return fig
+end
+
+function make_policy(A, varnames, offset::Integer)
+    B = BlockJacobian(eltype(A), varnames, varnames)
+    make_policy!(B, A, offset)
+    return B
+end
+
+function make_policy!(B::BlockJacobian{T}, A::AbstractMatrix{T}, offset::Integer) where {T}
+    for (i, input) in enumerate(inputs(B)), (o, output) in enumerate(outputs(B))
+        sym = ToeplitzSymbol(T)
+        sym[offset] = A[o, i]
+        B[output, input] += sym
+    end
+    return B
+end
+
+# TODO: make this general and add it to module
+function state_space_form(A::BlockJacobian, controls)
+    P, _ = solve(A, controls, QZ())
+
+    states = symdiff(inputs(A), controls)
+    ∂U = DynamicMacroeconomics.subset(A, :, states)
+    ∂Z = DynamicMacroeconomics.subset(A, :, controls)
+
+    sys = DynamicMacroeconomics.matrix_polynomial(∂U, P)
+    ∂U1 = DynamicMacroeconomics.getband(∂U, 1)
+
+    Q = BlockJacobian(eltype(Q2), controls, states)
+    P = make_policy(P, states, -1)
+
+    make_policy!(Q, sys \ -DynamicMacroeconomics.getband(∂Z, 0), 0)
+    make_policy!(Q, sys \ -(∂U1 * Q2 + DynamicMacroeconomics.getband(∂Z, 1)), 1)
+
+    return P, Q
 end
 
 ## RBC MODEL ###############################################################################
@@ -23,7 +59,7 @@ end
 @simple function firms(K, L, Z, α, δ)
     r = α * Z * (lag(K) / L)^(α - 1) - δ
     w = (1 - α) * Z * (lag(K) / L)^α
-    Y = Z * lag(K)^α * L^(α - 1)
+    Y = Z * lag(K)^α * L^(1 - α)
     return r, w, Y
 end
 
@@ -44,8 +80,25 @@ ss = solve_steady_state(
 
 # the full system Jacobian is accessible using a custom sparse chain rule accumulation
 𝒥 = jacobian(rbc_model, ss, (:K, :L, :Z), (:euler, :goods_mkt))
-G = solve(𝒥, (:Z, ), SequenceJacobian(150))
+G = solve(𝒥, (:Z, ), SequenceJacobian(300))
 
 # plot the sequence space Jacobians
 plot_responses(G[:K, :Z], 5; maxval=50)
 plot_responses(G[:L, :Z], 5; maxval=50)
+
+# we can compare this to the state space form as well
+P, Q = state_space_form(𝒥, (:Z, ))
+
+# initial shock at t = 0
+init_shock = Q
+irfs = zeros(2, 300)
+
+# stack the contemporaneous effects in irfs
+for t in 1:300
+    irfs[1, t] = init_shock[:K, :Z][-t + 1]
+    irfs[2, t] = init_shock[:L, :Z][-t + 1]
+    init_shock = P * init_shock
+end
+
+# the following difference should be relatively close to zero
+sum(irfs[1, :] .- G[:K, :Z][:, 1]) < 1e-10
