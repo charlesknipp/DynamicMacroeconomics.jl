@@ -120,7 +120,6 @@ ss = solve_steady_state(
 )
 
 # solve for the policy function to the first order
-# sys = FirstOrderSystem(𝒥, (:εs, :εd, :εm))
 P, Q = solve(𝒥, (:εs, :εd, :εm), QZ())
 
 # permute the dimensions to match Dynare
