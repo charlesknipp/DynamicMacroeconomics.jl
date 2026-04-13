@@ -6,9 +6,9 @@ using ToeplitzMatrices
 
 function plot_responses(A::Matrix, space::Integer=10; maxval::Integer=50)
     fig = Figure()
-    ax = Axis(fig[1, 1], limits = ((0, maxval), nothing))
-    for i in space:space:(maxval+1)
-        lines!(ax, 1:maxval, A[1:maxval, i], color=(i / maxval), colorrange=0:1)
+    ax = Axis(fig[1, 1]; limits=((0, maxval), nothing))
+    for i in space:space:(maxval + 1)
+        lines!(ax, 1:maxval, A[1:maxval, i]; color=(i / maxval), colorrange=0:1)
     end
     return fig
 end
@@ -39,10 +39,11 @@ function state_space_form(A::BlockJacobian, controls)
     sys = DynamicMacroeconomics.matrix_polynomial(∂U, P)
     ∂U1 = DynamicMacroeconomics.getband(∂U, 1)
 
-    Q = BlockJacobian(eltype(Q2), controls, states)
+    Q = BlockJacobian(eltype(sys), controls, states)
     P = make_policy(P, states, -1)
 
-    make_policy!(Q, sys \ -DynamicMacroeconomics.getband(∂Z, 0), 0)
+    Q2 = sys \ -DynamicMacroeconomics.getband(∂Z, 0)
+    make_policy!(Q, Q2, 0)
     make_policy!(Q, sys \ -(∂U1 * Q2 + DynamicMacroeconomics.getband(∂Z, 1)), 1)
 
     return P, Q
@@ -80,14 +81,14 @@ ss = solve_steady_state(
 
 # the full system Jacobian is accessible using a custom sparse chain rule accumulation
 𝒥 = jacobian(rbc_model, ss, (:K, :L, :Z), (:euler, :goods_mkt))
-G = solve(𝒥, (:Z, ), SequenceJacobian(300))
+G = solve(𝒥, (:Z,), SequenceJacobian(300))
 
 # plot the sequence space Jacobians
 plot_responses(G[:K, :Z], 5; maxval=50)
 plot_responses(G[:L, :Z], 5; maxval=50)
 
 # we can compare this to the state space form as well
-P, Q = state_space_form(𝒥, (:Z, ))
+P, Q = state_space_form(𝒥, (:Z,))
 
 # initial shock at t = 0
 init_shock = Q
