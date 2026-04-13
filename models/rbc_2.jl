@@ -7,7 +7,7 @@ function plot_responses(A::Matrix, space::Integer=10; maxval::Integer=50)
     fig = Figure()
     ax = Axis(fig[1, 1], limits = ((0, maxval), nothing))
     for i in 1:space:(maxval+1)
-        lines!(ax, 1:maxval, A[1:maxval, i])
+        lines!(ax, 1:maxval, A[1:maxval, i], color=(i / maxval), colorrange=0:1)
     end
     return fig
 end
