@@ -187,6 +187,29 @@ end
 (block::SimpleBlock)(x::ComponentArray, c::ComponentArray) = block([x; c])
 
 """
+    SolvedBlock{BT}
+
+A self contained model with a solvable component. Taking some simple block, an unknown, and
+a target; we can solve for the unknown to obtain a policy function for that component. This
+essentially removes the need to solve it out in the greater model.
+
+WARNING: This is still experimental and is likely not workable in the state space...
+"""
+struct SolvedBlock{BT<:AbstractBlock} <: AbstractBlock
+    child::BT
+    unknowns::OrderedSet{Symbol}
+    targets::OrderedSet{Symbol}
+    name::String
+end
+
+inputs(block::SolvedBlock) = inputs(block.child)
+outputs(block::SolvedBlock) = collect(union(outputs(block.child), block.unknowns))
+
+function solved(block::SimpleBlock, unknowns, targets)
+    return SolvedBlock(block, unknowns, targets, "$(block.name) (solved)")
+end
+
+"""
     ComposedBlock{PT,CT}
 
 A recursively defined block usually constructed by way of a topological sort. Each composed
