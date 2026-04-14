@@ -165,9 +165,10 @@ function (*)(A::BlockJacobian{AT}, B::BlockJacobian{BT}) where {AT,BT}
     return C
 end
 
+# TODO: test this more thouroughly
 function Base.merge(A::BlockJacobian{AT}, B::BlockJacobian{BT}) where {AT,BT}
     invars = intersect(inputs(A), inputs(B))
-    outvars = symdiff(outputs(A), outputs(B))
+    outvars = union(outputs(A), outputs(B))
     C = BlockJacobian(Base.promote_type(AT, BT), invars, outvars)
     for J in (A, B), o in outputs(J), i in inputs(J)
         C[o, i] = J[o, i]
