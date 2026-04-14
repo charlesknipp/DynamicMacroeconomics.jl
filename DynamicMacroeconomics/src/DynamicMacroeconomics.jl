@@ -23,8 +23,8 @@ using ComponentArrays
 using OffsetArrays
 using DataStructures
 
-export model, @simple, lead, lag, jacobian
-export SimpleBlock, CombinedBlock, ComposedBlock
+export model, @simple, @solved, lead, lag, jacobian
+export SimpleBlock, ComposedBlock
 export inputs, outputs
 
 # for steady state evaluations
@@ -36,9 +36,9 @@ offset(x::OffsetVector, t::Int) = x[t]
 abstract type AbstractBlock end
 
 function Base.show(io::IO, b::AbstractBlock)
-    inputs = join(b.inputs, ", ")
-    outputs = join(b.outputs, ", ")
-    return print(io, "$(b.name): ($inputs) → ($outputs)")
+    invars = join(inputs(b), ", ")
+    outvars = join(outputs(b), ", ")
+    return print(io, "$(b.name): ($invars) → ($outvars)")
 end
 
 function inputs(::AbstractBlock) end
@@ -54,6 +54,20 @@ initially treated as states. This allows us to calibrate parameters given a targ
 Model equations are subsumed into the functor attribute of each simple block, which are a
 heavily modified version of the user specified code. Although, the macro will preserve any
 LineNumberNodes, so any relevant stack traces will point back to the users original code.
+
+# EXAMPLE
+
+To construct a simple block, we use the macro `@simple` since metaprogramming performs some
+general hygeine and equation manipulation to obtain our desired process.
+
+```julia
+@simple function households(K, δ)
+    I = K - (1 - δ) * lag(K)
+    return I
+end
+```
+
+See also [`ComposedBlock`](@ref).
 """
 struct SimpleBlock{FT,SP} <: AbstractBlock
     functor::FT
@@ -68,7 +82,10 @@ outputs(block::SimpleBlock) = collect(block.outputs)
 
 macro simple(args...)
     func_def = MacroTools.splitdef(args[end])
-    block_name = func_def[:name]
+    return simple_block(func_def)
+end
+
+function simple_block(func_def; block_name=func_def[:name])
     inputs = OrderedSet{Symbol}(func_def[:args])
 
     # build an anonymous function call with gensym("functor")
@@ -194,6 +211,20 @@ a target; we can solve for the unknown to obtain a policy function for that comp
 essentially removes the need to solve it out in the greater model.
 
 WARNING: This is still experimental and is likely not workable in the state space...
+
+# EXAMPLE
+
+To construct a solved block, we can run the following code:
+
+```julia
+@solved (unknowns=:x, targets=:residual) function shock_process(x, ρ, ε)
+    residual = x - ρ * log(x) - ε
+    return residual
+end
+```
+
+Which creates a simple block stored in the global environment called `shock_process_inner`
+as well as the solved block named `shock_process`.
 """
 struct SolvedBlock{BT<:AbstractBlock} <: AbstractBlock
     child::BT
@@ -203,11 +234,47 @@ struct SolvedBlock{BT<:AbstractBlock} <: AbstractBlock
 end
 
 inputs(block::SolvedBlock) = inputs(block.child)
-outputs(block::SolvedBlock) = collect(union(outputs(block.child), block.unknowns))
+outputs(block::SolvedBlock) = union(outputs(block.child), block.unknowns)
 
-function solved(block::SimpleBlock, unknowns, targets)
+macro solved(args...)
+    unknowns, targets = extract_solved_args(args[1])
+    func_def = MacroTools.splitdef(args[end])
+    block_name = deepcopy(func_def[:name])
+
+    inner_block = Symbol(block_name, :_inner)
+    simple_stmt = simple_block(func_def; block_name=inner_block)
+    return MacroTools.@q begin
+        $(simple_stmt)
+        $(esc(block_name)) = $(SolvedBlock)(
+            $(esc(inner_block)), $(unknowns), $(targets), $(string(block_name))
+        )
+    end
+end
+
+function extract_solved_args(expr::Expr)
+    clean_expr = MacroTools.postwalk(expr) do ex
+        if @capture(ex, x_ = u_) && u isa QuoteNode
+            return :($x = [$u])
+        else
+            return ex
+        end
+    end
+
+    # these should be properly ordered, the LS will bitch at you if you try to unpack
+    unknowns, targets = eval(clean_expr)
+    return OrderedSet{Symbol}(collect(unknowns)), OrderedSet{Symbol}(collect(targets))
+end
+
+function _solved(block::SimpleBlock, unknowns, targets)
     return SolvedBlock(block, unknowns, targets, "$(block.name) (solved)")
 end
+
+# TODO: figure out functor evaluation with solved component
+function (block::SolvedBlock)(::ComponentArray)
+    error("not yet implemented")
+end
+
+(block::SolvedBlock)(::ComponentArray, ::ComponentArray) = block([x; c])
 
 """
     ComposedBlock{PT,CT}
@@ -221,6 +288,8 @@ parametric types to enforce stability through a recursive evaluation.
 
 To compose blocks, you should never have to call the constructor on its own, instead useres
 are directed to either the `compose` or `model` functions.
+
+See also [`SimpleBlock`](@ref).
 """
 struct ComposedBlock{PT,CT} <: AbstractBlock
     parent::PT
@@ -266,7 +335,6 @@ end
 
 include("jacobians.jl")
 include("steady_state.jl")
-# include("systems.jl")
 include("misc.jl")
 include("solutions.jl")
 # include("state_space.jl")
