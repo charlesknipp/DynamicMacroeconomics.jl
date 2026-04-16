@@ -1,3 +1,4 @@
+using ComponentArrays
 using DynamicMacroeconomics
 using FFTW
 using LinearAlgebra
@@ -6,20 +7,33 @@ using Tullio
 
 ## STRUCTURAL IDENTIFICATION ###############################################################
 
-struct StateSpaceForm{T,MT<:AbstractMatrix{T}}
-    A::MT
-    B::MT
-    C::MT
-    D::MT
+struct StateSpaceForm{
+    T,
+    AT<:AbstractMatrix{T},
+    BT<:AbstractMatrix{T},
+    CT<:AbstractMatrix{T},
+    DT<:AbstractMatrix{T}
+}
+    A::AT
+    B::BT
+    C::CT
+    D::DT
+end
+
+function state_space(P::ComponentMatrix, Q::ComponentMatrix, observables)
+    states, shocks = keys.(getaxes(Q))
+    return StateSpaceForm(
+        P[states, states], Q[states, shocks], P[observables, states], Q[observables, shocks]
+    )
 end
 
 Base.size(ssm::StateSpaceForm) = (size(ssm.A, 1), size(ssm.C, 1), size(ssm.B, 2))
 Base.size(ssm::StateSpaceForm, n::Integer) = size(ssm)[n]
 
-function innovations_form(ssm::StateSpaceForm)
+function innovations_form(ssm::StateSpaceForm{T}) where {T}
     Q, R = ssm.B * ssm.B', ssm.D * ssm.D'
-    riccati, _, _ = ared(ssm.A', ssm.C', R, Q, ssm.B * ssm.D')
-    K = (ssm.A * riccati * ssm.C' + ssm.B * ssm.D') * inv(ssm.C * riccati * ssm.C' + R)
+    riccati, _, _ = ared(ssm.A', ssm.C', R, Q, ssm.B * ssm.D', rtol=eps(T))
+    K = (ssm.A * riccati * ssm.C' + ssm.B * ssm.D') / (ssm.C * riccati * ssm.C' + R)
     Σ = ssm.C * riccati * ssm.C' + R
     return K, Σ
 end
@@ -30,7 +44,7 @@ function whiten(ssm::StateSpaceForm)
         [ssm.A zero(ssm.A); (K * ssm.C) (ssm.A - K * ssm.C)],
         [ssm.B; K * ssm.D],
         [ssm.C -ssm.C],
-        Matrix(ssm.D)
+        ssm.D
     ), Σ
 end
 
@@ -40,7 +54,7 @@ function impulse_response(ssm::StateSpaceForm{XT}, T::Integer) where {XT}
     for t in 1:(T-1)
         irf[:, :, t + 1] = ssm.C * (ssm.A ^ (t-1)) * ssm.B
     end
-    return irf
+    return ComponentArray(irf, getaxes(ssm.D)..., FlatAxis())
 end
 
 function spectral_covariance(M::AbstractArray{MT,3}) where {MT}
@@ -115,22 +129,15 @@ ss = solve_steady_state(
 𝒥 = jacobian(
     teq_model,
     ss,
-    (:y, :πs, :i, :ωs, :ωd, :ωm, :εs, :εd, :εm),
-    (:euler_res, :nkpc_res, :taylor_res, :sres, :dres, :mres),
+    (:y, :πs, :i, :ωd, :ωs, :ωm, :εd, :εs, :εm),
+    (:euler_res, :nkpc_res, :taylor_res, :dres, :sres, :mres),
 )
 
 # solve for the policy function to the first order
-P, Q = solve(𝒥, (:εs, :εd, :εm), QZ())
-
-# permute the dimensions to match Dynare
-p = [4, 2, 5, 6, 3, 1]
-perm_P = I(6)[[4, 2, 5, 6, 3, 1], :] * P' * I(6)[:, p]
-perm_Q = I(3)[[2, 1, 3], :] * Q' * I(6)[:, p]
+P, Q = solve(𝒥, (:εd, :εs, :εm), QZ())
 
 # create the observable/canonical state space model
-ssm = StateSpaceForm(
-    perm_P[1:4, 1:4]', perm_Q[1:3, 1:4]', perm_P[1:4, [5, 6, 1]]', perm_Q[:, [5, 6, 1]]'
-)
+ssm = state_space(P, Q, (:y, :πs, :i))
 
 # we can test out the impulse responses and covariance functions like so:
 M = impulse_response(ssm, 300)
@@ -138,3 +145,10 @@ M = impulse_response(ssm, 300)
 
 # for structural identification, compute the R^2 weights
 identification_weights(ssm, 100)
+
+# this doesn't work in the sequence space however
+G = solve(𝒥, (:εd, :εs, :εm), SequenceJacobian(300))
+
+# however, it is noteworthy that we can compute both B and D using G
+ssm.B ≈ G[:, (:εd, :εs, :εm), 1, 1]
+ssm.D ≈ G[(:y, :πs, :i), (:εd, :εs, :εm), 1, 1]

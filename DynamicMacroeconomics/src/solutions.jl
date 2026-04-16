@@ -45,6 +45,11 @@ end
 
 ## PERTURBATION METHODS ####################################################################
 
+# TODO: remove this dependency unless I get OffsetArrays working...
+function add_components(A::AbstractMatrix, rownames, colnames)
+    return ComponentMatrix(A, Axis(rownames...), Axis(colnames...))
+end
+
 """
     QuadraticIteration(; tol=1e-12, max_iters=2^10)
 
@@ -74,19 +79,21 @@ function solve(A::BlockJacobian, controls, algo::QuadraticIteration)
     ∂U = subset(A, :, states)
     ∂Z = subset(A, :, controls)
 
+    sys_range = offset_range(∂U)[2:end]
     ∂U1 = firstband(∂U)
     P = zero(∂U1)
-    system = matrix_polynomial(∂U, P)
+    system = matrix_polynomial(∂U, P, sys_range)
 
     for _ in 1:(algo.max_iters)
         P = -system \ ∂U1
-        system = matrix_polynomial(∂U, P)
+        system = matrix_polynomial(∂U, P, sys_range)
         if maximum(∂U1 + system * P) < algo.tol
             break
         end
     end
 
-    return P, system \ -getband(∂Z, 0)
+    Q = system \ -getband(∂Z, 0)
+    return add_components(P, states, states), add_components(Q, states, controls)
 end
 
 """
@@ -137,9 +144,10 @@ function LinearAlgebra.schur(A::BlockJacobian)
 end
 
 # TODO: there is likely a better approach
-function matrix_polynomial(A::BlockJacobian, P::AbstractMatrix)
-    idx = offset_range(A)[2:end]
-    return sum(ntuple(i -> getband(A, idx[i]) * (P ^ (i - 1)), length(idx)))
+function matrix_polynomial(
+    A::BlockJacobian, P::AbstractMatrix, bands::AbstractVector{<:Integer}
+)
+    return sum(ntuple(i -> getband(A, bands[i]) * (P ^ (i - 1)), length(bands)))
 end
 
 function solve(A::BlockJacobian, controls, ::QZ)
@@ -161,8 +169,9 @@ function solve(A::BlockJacobian, controls, ::QZ)
         warn("Invertibility condition violated")
     end
 
-    P = Z21 * inv(Z11)
-    return P, matrix_polynomial(∂U, P) \ -getband(∂Z, 0)
+    P = Z21 / Z11
+    Q = matrix_polynomial(∂U, P, offset_range(∂U)[2:end]) \ -getband(∂Z, 0)
+    return add_components(P, states, states), add_components(Q, states, controls)
 end
 
 ## SEQUENCE SPACE METHODS ##################################################################
@@ -209,10 +218,28 @@ function solve(A::BlockJacobian, controls, algo::SequenceJacobian)
     ∂U = subset(A, :, states)
     ∂Z = subset(A, :, controls)
 
-    # cast into a component matrix for now, but this is likely subject to change
-    return ComponentMatrix(
+    # cast into a component matrix for ease of reshaping later
+    G = ComponentMatrix(
         -sequence_jacobian(∂U, algo.T) \ sequence_jacobian(∂Z, algo.T),
         make_axis(states, algo.T),
         make_axis(controls, algo.T)
     )
+
+    # reshape into a multidimensional array
+    return reshape_jacobian(G, algo.T)
+end
+
+function reshape_jacobian(A::ComponentMatrix{AT}, T::Integer) where {AT}
+    states, shocks = keys.(getaxes(A))
+    B = ComponentArray(
+        zeros(AT, length(states), length(shocks), T, T),
+        Axis(states...),
+        Axis(shocks...),
+        FlatAxis(),
+        FlatAxis()
+    )
+    for state in states, shock in shocks
+        B[state, shock, :, :] = A[state, shock][:, :]
+    end
+    return B
 end

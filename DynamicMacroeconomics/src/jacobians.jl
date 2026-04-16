@@ -95,8 +95,8 @@ abstract type AbstractJacobian{T} end
 # TODO: replace the matrix with a vector and use CSR sparsity for indexing
 struct BlockJacobian{T} <: AbstractJacobian{T}
     partials::Matrix{ToeplitzSymbol{T,Int64}}
-    inputs::Dict{Symbol,Int64}
-    outputs::Dict{Symbol,Int64}
+    inputs::OrderedDict{Symbol,Int64}
+    outputs::OrderedDict{Symbol,Int64}
 end
 
 DynamicMacroeconomics.inputs(A::BlockJacobian) = keys(A.inputs)
@@ -112,8 +112,8 @@ function BlockJacobian(::Type{T}, inputs, outputs) where {T}
     base_impulse = ToeplitzSymbol(T)
     return BlockJacobian(
         fill(deepcopy(base_impulse), length(outputs), length(inputs)),
-        Dict(var => i for (i, var) in enumerate(inputs)),
-        Dict(var => i for (i, var) in enumerate(outputs)),
+        OrderedDict(var => i for (i, var) in enumerate(inputs)),
+        OrderedDict(var => i for (i, var) in enumerate(outputs)),
     )
 end
 
