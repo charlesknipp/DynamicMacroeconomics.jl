@@ -330,7 +330,7 @@ end
 # while not type stable, it will almost never be a bottleneck
 function model(blocks...; name::String="block")
     dag = construct_graph(blocks)
-    return mapreduce(i -> blocks[i], (x, y) -> compose(y, x), topological_sort(dag))
+    return mapreduce(i -> blocks[i], (x, y) -> compose(y, x, name), topological_sort(dag))
 end
 
 include("jacobians.jl")
