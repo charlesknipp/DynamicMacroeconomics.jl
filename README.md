@@ -4,13 +4,15 @@
 
 A general purpose DSGE interface which presents a lightweight approach to solving macroeconomic models. The purpose of creating this module was to rapidly estimate models in liu of (Childers, 2022).
 
-As a departure to `DifferentiableStateSpaceModels.jl`, this module is entirely self contained and builds off of existing tools like `GeneralisedFilters.jl` for marginalized likelihood estimation.
+As a departure to `DifferentiableStateSpaceModels`, this module relies on a custom modeling language free of large dependencies. The capable user can integrate this solver with existing modules like `GeneralisedFilters` and `Turing` for marginal likelihood estimation.
+
+For design choices and some background literature, I recommend skimming through [Literature.md](https://github.com/charlesknipp/DynamicMacroeconomics.jl/blob/main/DynamicMacroeconomics/docs/Literature.md) for a summary. I justify some of the departures of current popular frameworks, of which there are many.
 
 ## Installation
 
-Upon cloning this repository, we have to properly set up the environment to support the local execution of this interface; furthermore, we also rely on a development branch of `GeneralisedFilters.jl` for functional automatic differentiation.
+Upon cloning this repository, we have to properly set up the environment to support the local execution of this interface.
 
-To set this up, instantiate the environment described in [Project.toml](https://github.com/charlesknipp/DynamicMacroeconomics.jl/blob/main/Project.toml), by running `Using Pkg; Pkg.activate("."); Pkg.instantiate()` if not activated automatically.
+To set this up, instantiate the environment described in [Project.toml](https://github.com/charlesknipp/DynamicMacroeconomics.jl/blob/main/Project.toml), by running `Using Pkg; Pkg.activate("."); Pkg.instantiate(); Pkg.develop("DynamicMacroeconomics/")` upon first use. Subsequent runs should activate automatically, but updates to the `DynamicMacroeconomics` environment may require reinstantiating the module.
 
 ## A Simple Demonstration
 
@@ -48,7 +50,7 @@ end
 end
 ```
 
-Steady states are calculated internally, using `NonlinearSolve.jl` as a backend for optimization.
+Steady states are calculated internally, using `NonlinearSolve` as a backend for optimization.
 
 ```julia
 rbc_model = model(market_clearing, firms, households, shocks; name="rbc")
@@ -72,7 +74,7 @@ solve(rbc_model, ss, unknowns, shocks, targets; order=1, algo=QZ())
 solve(rbc_model, ss, unknowns, shocks, targets; order=1, algo=SequenceJacobian(150))
 ```
 
-We encourage the user to experiment with `SSMProblems.jl` to create a potentially nonlinear measurement, but we include a constructor for linear Gaussian state space models. To demonstrate we can create a state space observing consumption with a measurement noise of 1.0, and simulate 100 time periods.
+We encourage the user to experiment with `SSMProblems` to create a potentially nonlinear measurement, but we include a constructor for linear Gaussian state space models. To demonstrate we can create a state space observing consumption with a measurement noise of 1.0, and simulate 100 time periods.
 
 ```julia
 A, B = solve(rbc_model, ss, unknowns, shocks, targets; order=1, algo=QZ())
@@ -80,12 +82,10 @@ ssm = StateSpaceModel(..., LinearGaussianControllableDynamics(A, B), ...)
 x, y = sample(rng, ssm, 100)
 ```
 
-Using `GeneralizedFilters.jl`, we can extract the loglikelihood with the Kalman filter. This is used in `models/rbc.jl` for estimation. More details can be provided in that script (lol sike not really, although this will be soon reestablished).
+Using `GeneralizedFilters`, we can extract the loglikelihood with the Kalman filter. This is used in `models/rbc.jl` for estimation. More details can be provided in that script (lol sike not really, although this will be soon reestablished).
 
 ## Closing Remarks
 
-- Models support general offsets, but first order perturbation does not handle it just yet.
 - I plan on removing the `ComponentArrays.jl` dependency since it may have some odd type conversions.
-- Yes, I know the docs are broken and it will get fixed as soon as I can solve models consistently.
 
 Just ask me for questions on the implementation, and if you see anything questionable feel free to raise an issue or a PR.
