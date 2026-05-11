@@ -39,7 +39,11 @@ function state_space_form(A::BlockJacobian, controls)
     Q = BlockJacobian(eltype(P), controls, states)
     P = make_policy(P, states, -1)
 
-    system = DynamicMacroeconomics.matrix_polynomial(∂U, getband(P, -1))
+    # compute the matrix polynomial for the state space form
+    system = DynamicMacroeconomics.matrix_polynomial(
+        ∂U, getband(P, -1), DynamicMacroeconomics.offset_range(∂U)[2:end]
+    )
+
     make_policy!(Q, system \ -getband(∂Z, 0), 0)
     make_policy!(Q, system \ -(getband(∂U, 1) * getband(Q, 0) + getband(∂Z, 1)), 1)
 
@@ -99,4 +103,4 @@ for t in 1:300
 end
 
 # the following difference should be relatively close to zero
-sum(irfs[1, :] .- G[:K, :Z][:, 1]) < 1e-10
+sum(irfs[1, :] .- G[:K, :Z, :, 1]) < 1e-10
